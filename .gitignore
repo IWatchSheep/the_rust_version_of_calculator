@@ -1,0 +1,21 @@
+﻿/target/
+/.idea/
+
+# Nested Rust build folders
+**/target/
+
+# IDE settings
+**/.idea/
+
+# Python cache
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Python virtual environments
+**/.venv/
+**/venv/
+
+# Private environment files
+.env
+.env.*
