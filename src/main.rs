@@ -71,6 +71,27 @@ fn main() -> eframe::Result<()> {
             let mut app = if let Some(sc) = scenario {
                 let mut app = CalculatorApp::default();
                 match sc.as_str() {
+                    "initial_row1" => {
+                        app.doc.rows.truncate(1);
+                        app.doc.target_row = 0;
+                    }
+                    "rows_1_2" => {
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["1".to_string()];
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["1".to_string()];
+                        app.doc.target_row = 1;
+                    }
+                    "rows_1_2_total" => {
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["1".to_string()];
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["1".to_string()];
+                        let _ = app.doc.equals_all();
+                        app.doc.target_row = 1;
+                    }
                     "3_rows_aligned" => {
                         // Row 1: 10
                         app.doc.rows[0].inputs = vec!["10".to_string()];

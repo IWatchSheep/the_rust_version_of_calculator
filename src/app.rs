@@ -893,11 +893,12 @@ impl CalculatorApp {
         }
     }
 
-    /// Checkpoint 7B: Authoritative 18-column Excel-style row component for Row 1.
+    /// Checkpoint 7B & 7D: Authoritative 18-column Excel-style row component for all rows & total row.
     pub fn ui_18col_row(&mut self, ui: &mut Ui, i: usize, is_target: bool) -> Option<Vec<usize>> {
         let mut focused_path = None;
         let row_h = 96.0;
         let subrow_top = 26.0;
+        let is_res = self.doc.rows[i].is_result;
 
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
@@ -906,180 +907,213 @@ impl CalculatorApp {
             let col_a_w = excel_18col_effective_column_width(COL_A_ROW_LABEL);
             fixed_col(ui, col_a_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
                 ui.add_space(14.0);
-                let badge_bg = if is_target { ROW_BADGE_ACTIVE } else { ROW_BADGE_BG };
-                let title = format!("Row {}", i + 1);
+                let badge_bg = if is_res {
+                    ROW_BADGE_BG
+                } else if is_target {
+                    ROW_BADGE_ACTIVE
+                } else {
+                    ROW_BADGE_BG
+                };
+                let title = if is_res {
+                    "Total".to_string()
+                } else {
+                    format!("Row {}", i + 1)
+                };
                 let btn = Button::new(RichText::new(title).size(13.0).strong().color(ROW_BADGE_FG))
                     .fill(badge_bg)
                     .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0x8a, 0xb8, 0x80)))
                     .rounding(2.0);
                 if ui.add_sized(egui::vec2(78.0, 28.0), btn).clicked() {
-                    self.doc.target_row = i;
-                    self.doc.target_path = self.doc.rows[i].first_box();
+                    if !is_res {
+                        self.doc.target_row = i;
+                        self.doc.target_path = self.doc.rows[i].first_box();
+                    }
                 }
-                if let Some(op) = self.doc.rows[i].operator() {
-                    ui.label(RichText::new(op.name).size(9.0).italics().color(ROW_BADGE_FG));
+                if !is_res {
+                    if let Some(op) = self.doc.rows[i].operator() {
+                        ui.label(RichText::new(op.name).size(9.0).italics().color(ROW_BADGE_FG));
+                    }
                 }
             });
 
-            // 2. Col B (2): Spacer AB (width 10)
+            // Column widths for Cols B..I
             let col_b_w = excel_18col_effective_column_width(COL_B_SPACER_AB);
-            ui.add_space(col_b_w);
-
-            // 3. Col C (3): Mathematical join region (width 42)
             let col_c_w = excel_18col_effective_column_width(COL_C_MATH_SIGN);
-            fixed_col(ui, col_c_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
-                if i > 0 && !self.doc.rows[i].is_result {
-                    ui.add_space(subrow_top + 6.0);
-                    let sym = self.doc.rows[i].join.symbol();
-                    let display_sym = if sym.is_empty() { "□" } else { sym };
-                    let btn = Button::new(RichText::new(display_sym).size(14.0).strong().color(Color32::BLACK))
-                        .fill(Color32::from_rgb(0xfb, 0xd3, 0x4d))
-                        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0xd0, 0xa0, 0x20)))
-                        .rounding(2.0);
-                    if ui.add_sized(egui::vec2(32.0, 32.0), btn).clicked() {
-                        self.doc.target_row = i;
-                        self.doc.rows[i].join = match self.doc.rows[i].join {
-                            Join::None => Join::Add,
-                            Join::Add => Join::Sub,
-                            Join::Sub => Join::Mul,
-                            Join::Mul => Join::Div,
-                            Join::Div => Join::Eq,
-                            Join::Eq => Join::Then,
-                            _ => Join::None,
-                        };
-                        self.doc.rows[i].clear_result();
-                    }
-                } else {
-                    // Blank spacer for Row 1
-                    ui.add_space(row_h);
-                }
-            });
-
-            // 4. Col D (4): Spacer CD (width 10)
             let col_d_w = excel_18col_effective_column_width(COL_D_SPACER_CD);
-            ui.add_space(col_d_w);
-
-            // 5. Col E (5): Main mathematical input (width 114)
             let col_e_w = excel_18col_effective_column_width(COL_E_NUMBER_MATH);
-            let target_path = self.doc.target_path.clone();
-            if self.doc.rows[i].flatten().is_empty() {
-                fixed_col(ui, col_e_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
-                    ui.add_space(subrow_top + 4.0);
-                    if self.doc.rows[i].inputs.is_empty() {
-                        self.doc.rows[i].inputs.push(String::new());
-                    }
-                    let num_text = self.doc.rows[i].inputs.first().map(|s| s.as_str()).unwrap_or("");
-                    let display_num = if num_text.is_empty() { "□" } else { num_text };
-                    let (bg, stroke) = if is_target {
-                        (Color32::from_rgb(0xde, 0xee, 0xfc), egui::Stroke::new(2.0, Color32::from_rgb(0x1e, 0x88, 0xe5)))
+            let col_f_w = excel_18col_effective_column_width(COL_F_MATH_BOX1);
+            let col_g_w = excel_18col_column_width(COL_G_MATH_TRAILING);
+            let col_h_w = excel_18col_effective_column_width(COL_H_SPACER_GH);
+            let col_i_w = excel_18col_effective_column_width(COL_I_ACTIONS);
+
+            if is_res {
+                // In Total row, columns B through I are blank, preserving exact alignment to Column J (=)
+                let empty_w = col_b_w + col_c_w + col_d_w + col_e_w + col_f_w + col_g_w + col_h_w + col_i_w;
+                ui.add_space(empty_w);
+            } else {
+                // 2. Col B (2): Spacer AB (width 10)
+                ui.add_space(col_b_w);
+
+                // 3. Col C (3): Mathematical join region (width 42)
+                fixed_col(ui, col_c_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                    if i > 0 {
+                        ui.add_space(subrow_top + 6.0);
+                        let sym = self.doc.rows[i].join.symbol();
+                        let display_sym = if sym.is_empty() { "□" } else { sym };
+                        let btn = Button::new(RichText::new(display_sym).size(14.0).strong().color(Color32::BLACK))
+                            .fill(Color32::from_rgb(0xfb, 0xd3, 0x4d))
+                            .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0xd0, 0xa0, 0x20)))
+                            .rounding(1.0);
+                        if ui.add_sized(egui::vec2(32.0, 32.0), btn).clicked() {
+                            self.doc.target_row = i;
+                            self.doc.rows[i].join = match self.doc.rows[i].join {
+                                Join::None => Join::Add,
+                                Join::Add => Join::Sub,
+                                Join::Sub => Join::Mul,
+                                Join::Mul => Join::Div,
+                                Join::Div => Join::Eq,
+                                Join::Eq => Join::Then,
+                                _ => Join::None,
+                            };
+                            self.doc.rows[i].clear_result();
+                        }
                     } else {
-                        (Color32::WHITE, egui::Stroke::new(1.0, Color32::from_rgb(0x88, 0x88, 0x88)))
-                    };
-                    let btn = Button::new(RichText::new(display_num).size(14.0).strong().color(Color32::BLACK))
-                        .fill(bg)
-                        .stroke(stroke)
-                        .rounding(2.0);
-                    if ui.add_sized(egui::vec2(100.0, 36.0), btn).clicked() {
-                        self.doc.target_row = i;
-                        self.doc.target_path = vec![0];
-                        self.doc.rows[i].ensure_number_box();
+                        // Blank spacer for Row 1
+                        ui.add_space(row_h);
                     }
                 });
-            } else {
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(col_e_w, row_h), egui::Sense::hover());
-                let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::top_down(egui::Align::Center)));
-                child.add_space(subrow_top + 4.0);
-                ScrollArea::horizontal()
-                    .id_salt(("math_slot_18col", i))
-                    .auto_shrink([false, false])
-                    .show(&mut child, |ui| {
-                        focused_path = self.ui_formula(ui, i, is_target, &target_path);
-                    });
-            }
 
-            // 6. Col F (6): Description input (width 140)
-            let col_f_w = excel_18col_effective_column_width(COL_F_MATH_BOX1);
-            fixed_col(ui, col_f_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
-                ui.add_space(subrow_top + 9.0);
-                if self.doc.rows[i].math_descriptions.is_empty() {
-                    self.doc.rows[i].math_descriptions.push(String::new());
-                }
-                for (idx, desc) in self.doc.rows[i].math_descriptions.iter_mut().enumerate() {
-                    let hint = if idx == 0 {
-                        "Descriptive Text Box 1".to_string()
-                    } else {
-                        format!("Descriptive Text Box {}", idx + 1)
-                    };
-                    ui.add_sized(
-                        egui::vec2(136.0, 26.0),
-                        egui::TextEdit::singleline(desc).hint_text(hint),
-                    );
-                }
-            });
+                // 4. Col D (4): Spacer CD (width 10)
+                ui.add_space(col_d_w);
 
-            // 7. Col G (7): Orange + control (math) (width 42)
-            let col_g_w = excel_18col_column_width(COL_G_MATH_TRAILING);
-            fixed_col(ui, col_g_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
-                ui.add_space(subrow_top + 8.0);
-                let btn = Button::new(RichText::new("+").size(14.0).strong().color(Color32::WHITE))
-                    .fill(Color32::from_rgb(0xf3, 0x9c, 0x12))
-                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0xd9, 0x77, 0x06)))
-                    .rounding(2.0);
-                if ui.add_sized(egui::vec2(28.0, 28.0), btn).clicked() {
-                    self.doc.rows[i].add_math_description();
-                    self.status = format!(
-                        "Row {}: Added descriptive box {}.",
-                        i + 1,
-                        self.doc.rows[i].math_descriptions.len()
-                    );
-                }
-            });
-
-            // 8. Col H (8): Spacer GH (width 10)
-            let col_h_w = excel_18col_effective_column_width(COL_H_SPACER_GH);
-            ui.add_space(col_h_w);
-
-            // 9. Col I (9): Mathematical operation controls (width 130)
-            let col_i_w = excel_18col_effective_column_width(COL_I_ACTIONS);
-            fixed_col(ui, col_i_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
-                ui.add_space(2.0);
-                // Top button: "math to put on the left"
-                egui::Frame::none()
-                    .fill(Color32::BLACK)
-                    .inner_margin(egui::Margin::same(2.0))
-                    .show(ui, |ui| {
-                        let btn = Button::new(
-                            RichText::new("math to put
-on the left")
-                                .size(9.5)
-                                .strong()
-                                .color(Color32::BLACK),
-                        )
-                        .fill(Color32::WHITE)
-                        .rounding(0.0);
-                        if ui.add_sized(egui::vec2(118.0, 30.0), btn).clicked() {
+                // 5. Col E (5): Main mathematical input (width 114)
+                let target_path = self.doc.target_path.clone();
+                if self.doc.rows[i].flatten().is_empty() {
+                    fixed_col(ui, col_e_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                        ui.add_space(subrow_top + 4.0);
+                        if self.doc.rows[i].inputs.is_empty() {
+                            self.doc.rows[i].inputs.push(String::new());
+                        }
+                        let num_text = self.doc.rows[i].inputs.first().map(|s| s.as_str()).unwrap_or("");
+                        let display_num = if num_text.is_empty() { "□" } else { num_text };
+                        let (bg, stroke) = if is_target {
+                            (Color32::from_rgb(0xde, 0xee, 0xfc), egui::Stroke::new(2.0, Color32::from_rgb(0x1e, 0x88, 0xe5)))
+                        } else {
+                            (Color32::WHITE, egui::Stroke::new(1.0, Color32::from_rgb(0x88, 0x88, 0x88)))
+                        };
+                        let btn = Button::new(RichText::new(display_num).size(14.0).strong().color(Color32::BLACK))
+                            .fill(bg)
+                            .stroke(stroke)
+                            .rounding(1.0);
+                        if ui.add_sized(egui::vec2(100.0, 36.0), btn).clicked() {
                             self.doc.target_row = i;
-                            self.show_ops = true;
+                            self.doc.target_path = vec![0];
+                            self.doc.rows[i].ensure_number_box();
                         }
                     });
-
-                ui.add_space(14.0);
-
-                // Bottom button: "clear math on the left"
-                let clr_btn = Button::new(
-                    RichText::new("clear math on the left")
-                        .size(9.5)
-                        .strong()
-                        .color(CLEAR_MATH_FG),
-                )
-                .fill(CLEAR_MATH_BG)
-                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0xe0, 0xa0, 0xa0)))
-                .rounding(2.0);
-                if ui.add_sized(egui::vec2(122.0, 26.0), clr_btn).clicked() {
-                    self.doc.clear_row_math(i);
-                    self.doc.template = None;
+                } else {
+                    let (rect, _) = ui.allocate_exact_size(egui::vec2(col_e_w, row_h), egui::Sense::hover());
+                    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::top_down(egui::Align::Center)));
+                    child.add_space(subrow_top + 4.0);
+                    ScrollArea::horizontal()
+                        .id_salt(("math_slot_18col", i))
+                        .auto_shrink([false, false])
+                        .show(&mut child, |ui| {
+                            focused_path = self.ui_formula(ui, i, is_target, &target_path);
+                        });
                 }
-            });
+
+                // 6. Col F (6): Description input (width 140)
+                fixed_col(ui, col_f_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.add_space(subrow_top + 9.0);
+                    if self.doc.rows[i].math_descriptions.is_empty() {
+                        self.doc.rows[i].math_descriptions.push(String::new());
+                    }
+                    for (idx, desc) in self.doc.rows[i].math_descriptions.iter_mut().enumerate() {
+                        let hint = if idx == 0 {
+                            "Descriptive Text Box 1".to_string()
+                        } else {
+                            format!("Descriptive Text Box {}", idx + 1)
+                        };
+                        egui::Frame::none()
+                            .fill(Color32::WHITE)
+                            .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0x88, 0x88, 0x88)))
+                            .rounding(0.0)
+                            .inner_margin(egui::Margin::symmetric(4.0, 2.0))
+                            .show(ui, |ui| {
+                                ui.add_sized(
+                                    egui::vec2(128.0, 22.0),
+                                    egui::TextEdit::singleline(desc)
+                                        .frame(false)
+                                        .hint_text(RichText::new(hint).color(Color32::from_rgb(0x99, 0x99, 0x99)))
+                                        .text_color(Color32::BLACK),
+                                );
+                            });
+                    }
+                });
+
+                // 7. Col G (7): Orange + control (math) (width 42)
+                fixed_col(ui, col_g_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.add_space(subrow_top + 8.0);
+                    let btn = Button::new(RichText::new("+").size(14.0).strong().color(ORANGE_TEXT))
+                        .fill(Color32::from_rgb(0xfb, 0xe4, 0xcf))
+                        .stroke(egui::Stroke::new(1.0, ORANGE_BORDER))
+                        .rounding(1.0);
+                    if ui.add_sized(egui::vec2(28.0, 28.0), btn).clicked() {
+                        self.doc.rows[i].add_math_description();
+                        self.status = format!(
+                            "Row {}: Added descriptive box {}.",
+                            i + 1,
+                            self.doc.rows[i].math_descriptions.len()
+                        );
+                    }
+                });
+
+                // 8. Col H (8): Spacer GH (width 10)
+                ui.add_space(col_h_w);
+
+                // 9. Col I (9): Mathematical operation controls (width 130)
+                fixed_col(ui, col_i_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.add_space(2.0);
+                    // Top button: "math to put on the left"
+                    egui::Frame::none()
+                        .fill(Color32::WHITE)
+                        .stroke(egui::Stroke::new(1.0, Color32::BLACK))
+                        .rounding(0.0)
+                        .inner_margin(egui::Margin::same(2.0))
+                        .show(ui, |ui| {
+                            let btn = Button::new(
+                                RichText::new("math to put\non the left")
+                                    .size(9.5)
+                                    .strong()
+                                    .color(Color32::BLACK),
+                            )
+                            .fill(Color32::WHITE)
+                            .rounding(0.0);
+                            if ui.add_sized(egui::vec2(118.0, 30.0), btn).clicked() {
+                                self.doc.target_row = i;
+                                self.show_ops = true;
+                            }
+                        });
+
+                    ui.add_space(8.0);
+
+                    // Bottom button: "clear math on the left"
+                    let clr_btn = Button::new(
+                        RichText::new("clear math on the left")
+                            .size(9.5)
+                            .strong()
+                            .color(CLEAR_MATH_FG),
+                    )
+                    .fill(CLEAR_MATH_BG)
+                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0xe0, 0xa0, 0xa0)))
+                    .rounding(1.0);
+                    if ui.add_sized(egui::vec2(122.0, 26.0), clr_btn).clicked() {
+                        self.doc.clear_row_math(i);
+                        self.doc.template = None;
+                    }
+                });
+            }
 
             // 10. Col J (10): Equals control (=) (width 42)
             let col_j_w = excel_18col_effective_column_width(COL_J_RESULT_EQUALS);
@@ -1095,7 +1129,7 @@ on the left")
                 let btn = Button::new(RichText::new("+").size(14.0).strong().color(Color32::WHITE))
                     .fill(Color32::from_rgb(0x1e, 0x88, 0xe5))
                     .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0x15, 0x65, 0xc0)))
-                    .rounding(2.0);
+                    .rounding(1.0);
                 if ui.add_sized(egui::vec2(30.0, 30.0), btn).clicked() {
                     self.doc.rows[i].add_paren_pair();
                     self.doc.sync_closing_parentheses_capacity();
@@ -1123,7 +1157,7 @@ on the left")
                     let btn = Button::new(RichText::new("(").size(14.0).strong().color(fg))
                         .fill(bg)
                         .stroke(stroke)
-                        .rounding(2.0);
+                        .rounding(1.0);
                     if ui.add_sized(egui::vec2(30.0, 30.0), btn).clicked() {
                         self.doc.rows[i].toggle_paren_open(p);
                         self.doc.sync_closing_parentheses_capacity();
@@ -1139,7 +1173,7 @@ on the left")
                 let btn = Button::new(RichText::new(res_text).size(14.0).strong().color(Color32::BLACK))
                     .fill(Color32::from_rgb(0xde, 0xee, 0xfc))
                     .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0x60, 0x80, 0xa0)))
-                    .rounding(2.0);
+                    .rounding(1.0);
                 if ui.add_sized(egui::vec2(100.0, 32.0), btn).clicked() {
                     self.doc.target_row = i;
                 }
@@ -1148,11 +1182,20 @@ on the left")
             // 14. Col N (14): Individual row exponent box 1 (superscript in subrow 0) (width 48)
             let col_n_w = excel_18col_effective_column_width(COL_N_EXPONENT_1);
             fixed_col(ui, col_n_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
-                ui.add_space(2.0);
-                ui.add_sized(
-                    egui::vec2(44.0, 22.0),
-                    egui::TextEdit::singleline(&mut self.doc.rows[i].exponent_1).hint_text("exp"),
-                );
+                ui.add_space(6.0);
+                egui::Frame::none()
+                    .fill(Color32::WHITE)
+                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0x70, 0x70, 0x70)))
+                    .rounding(0.0)
+                    .inner_margin(egui::Margin::symmetric(2.0, 1.0))
+                    .show(ui, |ui| {
+                        ui.add_sized(
+                            egui::vec2(28.0, 18.0),
+                            egui::TextEdit::singleline(&mut self.doc.rows[i].exponent_1)
+                                .frame(false)
+                                .text_color(Color32::BLACK),
+                        );
+                    });
             });
 
             // 15 & 16. Col O (15) & Col P (16): Closing parenthesis and paired group exponent box
@@ -1171,7 +1214,7 @@ on the left")
                     let btn = Button::new(RichText::new(")").size(14.0).strong().color(fg))
                         .fill(bg)
                         .stroke(stroke)
-                        .rounding(2.0);
+                        .rounding(1.0);
                     if ui.add_sized(egui::vec2(30.0, 30.0), btn).clicked() {
                         self.doc.rows[i].toggle_paren_close(p);
                         self.doc.sync_closing_parentheses_capacity();
@@ -1180,14 +1223,23 @@ on the left")
 
                 // Col P: Group Exponent Box (superscript in subrow 0)
                 fixed_col(ui, col_p_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
-                    ui.add_space(2.0);
+                    ui.add_space(6.0);
                     if p >= self.doc.rows[i].exponent_2_boxes.len() {
                         self.doc.rows[i].exponent_2_boxes.resize(p + 1, String::new());
                     }
-                    ui.add_sized(
-                        egui::vec2(44.0, 22.0),
-                        egui::TextEdit::singleline(&mut self.doc.rows[i].exponent_2_boxes[p]).hint_text("exp"),
-                    );
+                    egui::Frame::none()
+                        .fill(Color32::WHITE)
+                        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0x70, 0x70, 0x70)))
+                        .rounding(0.0)
+                        .inner_margin(egui::Margin::symmetric(2.0, 1.0))
+                        .show(ui, |ui| {
+                            ui.add_sized(
+                                egui::vec2(28.0, 18.0),
+                                egui::TextEdit::singleline(&mut self.doc.rows[i].exponent_2_boxes[p])
+                                    .frame(false)
+                                    .text_color(Color32::BLACK),
+                            );
+                        });
                 });
             }
 
@@ -1204,10 +1256,20 @@ on the left")
                     } else {
                         format!("Descriptive Text Box {}", idx + 1)
                     };
-                    ui.add_sized(
-                        egui::vec2(136.0, 26.0),
-                        egui::TextEdit::singleline(desc).hint_text(hint),
-                    );
+                    egui::Frame::none()
+                        .fill(Color32::WHITE)
+                        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0x88, 0x88, 0x88)))
+                        .rounding(0.0)
+                        .inner_margin(egui::Margin::symmetric(4.0, 2.0))
+                        .show(ui, |ui| {
+                            ui.add_sized(
+                                egui::vec2(128.0, 22.0),
+                                egui::TextEdit::singleline(desc)
+                                    .frame(false)
+                                    .hint_text(RichText::new(hint).color(Color32::from_rgb(0x99, 0x99, 0x99)))
+                                    .text_color(Color32::BLACK),
+                            );
+                        });
                 }
             });
 
@@ -1215,10 +1277,10 @@ on the left")
             let col_r_w = excel_18col_column_width(COL_R_RESULT_TRAILING);
             fixed_col(ui, col_r_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
                 ui.add_space(subrow_top + 8.0);
-                let btn = Button::new(RichText::new("+").size(14.0).strong().color(Color32::WHITE))
-                    .fill(Color32::from_rgb(0xf3, 0x9c, 0x12))
-                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0xd9, 0x77, 0x06)))
-                    .rounding(2.0);
+                let btn = Button::new(RichText::new("+").size(14.0).strong().color(ORANGE_TEXT))
+                    .fill(Color32::from_rgb(0xfb, 0xe4, 0xcf))
+                    .stroke(egui::Stroke::new(1.0, ORANGE_BORDER))
+                    .rounding(1.0);
                 if ui.add_sized(egui::vec2(28.0, 28.0), btn).clicked() {
                     self.doc.rows[i].add_result_description();
                     self.status = format!(
@@ -1604,7 +1666,7 @@ on the left")
             });
     }
 
-    fn on_key(&mut self, key: &str) {
+    pub fn on_key(&mut self, key: &str) {
         match key {
             "±" => {
                 self.doc.ensure_target();
