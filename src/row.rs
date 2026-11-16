@@ -108,6 +108,22 @@ pub struct Row {
     pub error: Option<String>,
     /// Words typed into a card's Label / Item and Context boxes: flat card index -> (label, context).  They replace the operator's default words (`layout::words`).
     pub words: std::collections::HashMap<usize, (String, String)>,
+
+    // === Checkpoint 7B: 18-Column State ===
+    /// Mathematical descriptive text boxes (Col F: Box 1, Box 2, etc.)
+    pub math_descriptions: Vec<String>,
+    /// Result descriptive text boxes (Col Q: Box 1, Box 2, etc.)
+    pub result_descriptions: Vec<String>,
+    /// Number of parenthesis pairs on this row (Col K adds pairs, default 1)
+    pub paren_pairs_count: usize,
+    /// Opening parenthesis active/toggled state for each pair (Col L)
+    pub paren_open_states: Vec<bool>,
+    /// Closing parenthesis active/toggled state for each pair (Col O)
+    pub paren_close_states: Vec<bool>,
+    /// Individual row exponent text (Col N, superscript row 0)
+    pub exponent_1: String,
+    /// Group exponent texts paired with closing parentheses (Col P, superscript row 0)
+    pub exponent_2_boxes: Vec<String>,
 }
 
 impl Row {
@@ -123,7 +139,53 @@ impl Row {
             is_result: false,
             error: None,
             words: std::collections::HashMap::new(),
+            math_descriptions: vec![String::new()],
+            result_descriptions: vec![String::new()],
+            paren_pairs_count: 1,
+            paren_open_states: vec![false],
+            paren_close_states: vec![false],
+            exponent_1: String::new(),
+            exponent_2_boxes: vec![String::new()],
         }
+    }
+
+    /// Add a pair of opening and closing parentheses to this row, expanding rightwards.
+    /// Ensure this row has at least 	arget_pairs parenthesis pairs available.
+    pub fn ensure_paren_pairs(&mut self, target_pairs: usize) {
+        while self.paren_pairs_count < target_pairs {
+            self.add_paren_pair();
+        }
+    }
+
+    pub fn add_paren_pair(&mut self) {
+        self.paren_pairs_count += 1;
+        self.paren_open_states.push(false);
+        self.paren_close_states.push(false);
+        self.exponent_2_boxes.push(String::new());
+    }
+
+    /// Toggle active/inactive state of opening parenthesis '(' at pair index p.
+    pub fn toggle_paren_open(&mut self, p: usize) {
+        if p < self.paren_open_states.len() {
+            self.paren_open_states[p] = !self.paren_open_states[p];
+        }
+    }
+
+    /// Toggle active/inactive state of closing parenthesis ')' at pair index p.
+    pub fn toggle_paren_close(&mut self, p: usize) {
+        if p < self.paren_close_states.len() {
+            self.paren_close_states[p] = !self.paren_close_states[p];
+        }
+    }
+
+    /// Add another mathematical description box (orange + in Column G).
+    pub fn add_math_description(&mut self) {
+        self.math_descriptions.push(String::new());
+    }
+
+    /// Add another result description box (orange + in Column R).
+    pub fn add_result_description(&mut self) {
+        self.result_descriptions.push(String::new());
     }
 
     /// Forget the answer (something was changed).
@@ -481,7 +543,7 @@ impl Document {
         self.place_row(Row::with_operator(op));
     }
 
-    /// Put a ready-made tree (an operator, or a template) into the target row; same rules as `place_operator`.
+    /// Put a ready-made tree (an operator, or a template) into the target row; same rules as `place_operator` .
     pub fn place_row(&mut self, new: Row) {
         self.ensure_target();
         if self.rows[self.target_row].is_result {
@@ -627,6 +689,28 @@ impl Document {
     }
 
     /// Take the math out of one row (the row stays, empty).
+    /// Ensure subsequent rows provide enough closing parenthesis buttons for any active,
+    /// unmatched opening parentheses from preceding rows (matching Python Checkpoint 6B).
+    pub fn sync_closing_parentheses_capacity(&mut self) {
+        let mut unmatched = 0;
+        for r in 0..self.rows.len() {
+            if self.rows[r].is_result {
+                continue;
+            }
+            let needed_pairs = unmatched.max(1);
+            if needed_pairs > self.rows[r].paren_pairs_count {
+                self.rows[r].ensure_paren_pairs(needed_pairs);
+            }
+            let open_count = self.rows[r].paren_open_states.iter().filter(|&&s| s).count();
+            let close_count = self.rows[r].paren_close_states.iter().filter(|&&s| s).count();
+            if open_count > close_count {
+                unmatched += open_count - close_count;
+            } else {
+                unmatched = unmatched.saturating_sub(close_count - open_count);
+            }
+        }
+    }
+
     pub fn clear_row_math(&mut self, i: usize) {
         if i < self.rows.len() {
             let join = self.rows[i].join;

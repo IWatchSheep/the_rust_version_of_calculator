@@ -3,6 +3,7 @@
 use eframe::egui::{self, Color32, RichText, Ui};
 use egui::{Button, ScrollArea, TextEdit};
 
+use crate::gui_coordinates::*;
 use crate::ops;
 use crate::row::{Document, Join, Row};
 
@@ -32,13 +33,16 @@ const COL_HELPER: f32 = 430.0;
 const COL_ACTIONS: f32 = 160.0;
 const COL_RESULT: f32 = 410.0;
 const ROWS_CANVAS_H: f32 = 290.0;
+#[allow(dead_code)]
 const MATH_SLOT_H: f32 = 118.0;
 const MATH_SLOT_MIN_W: f32 = 420.0;
 const MATH_SLOT_MAX_W: f32 = 560.0;
 /// Fixed row-grid content width at the math-slot floor (for horizontal scroll when the window is narrow).
 const ROWS_CONTENT_MIN_W: f32 = COL_ROW + COL_HELPER + MATH_SLOT_MIN_W + COL_ACTIONS + COL_RESULT + 16.0;
+#[allow(dead_code)]
 const ROW_CARD_TOP: f32 = 19.0;
 const CARD_FRAME_INSET: f32 = 2.0;
+#[allow(dead_code)]
 const MATH_SLOT_INSET: f32 = 4.0;
 /// 3×3 arrow grid height (24 + 2 + 36 + 2 + 24). Lead/trailing span this full height
 /// like Tkinter `make_component` rowspan=3, so vertical middles and bottoms stay aligned.
@@ -53,7 +57,7 @@ const ITEM_W_MIN: f32 = 48.0;
 const CONTEXT_W_MIN: f32 = 72.0;
 
 pub struct CalculatorApp {
-    doc: Document,
+    pub doc: Document,
     status: String,
     show_ops: bool,
     op_filter: String,
@@ -84,6 +88,8 @@ pub struct CalculatorApp {
     /// Last seen target/count — used to auto-request scroll when join/`Next Row` adds rows.
     rows_follow_target: usize,
     rows_follow_count: usize,
+    pub screenshot_path: Option<std::path::PathBuf>,
+    pub screenshot_frame_count: usize,
 }
 
 struct TplPreview {
@@ -149,11 +155,19 @@ impl Default for CalculatorApp {
             rows_scroll_to: None,
             rows_follow_target: 0,
             rows_follow_count: 2,
+            screenshot_path: None,
+            screenshot_frame_count: 0,
         }
     }
 }
 
 impl CalculatorApp {
+    pub fn with_screenshot(path: std::path::PathBuf) -> Self {
+        let mut app = Self::default();
+        app.screenshot_path = Some(path);
+        app
+    }
+
     pub fn with_demo(key: &str, inputs: &[String]) -> Self {
         let mut app = Self::default();
         if let Some(op) = ops::get(key) {
@@ -188,6 +202,32 @@ impl CalculatorApp {
 
 impl eframe::App for CalculatorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(ref path) = self.screenshot_path.clone() {
+            self.screenshot_frame_count += 1;
+            if self.screenshot_frame_count >= 5 {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+            }
+            ctx.input(|input| {
+                for event in &input.raw.events {
+                    if let egui::Event::Screenshot { image, .. } = event {
+                        let w = image.size[0];
+                        let h = image.size[1];
+                        let mut rgb = Vec::with_capacity(w * h * 3);
+                        for pixel in &image.pixels {
+                            rgb.push(pixel.r());
+                            rgb.push(pixel.g());
+                            rgb.push(pixel.b());
+                        }
+                        if let Ok(file) = std::fs::File::create(path) {
+                            let mut writer = std::io::BufWriter::new(file);
+                            let mut encoder = image::codecs::jpeg::JpegEncoder::new(&mut writer);
+                            let _ = encoder.encode(&rgb, w as u32, h as u32, image::ExtendedColorType::Rgb8);
+                        }
+                        std::process::exit(0);
+                    }
+                }
+            });
+        }
         let mut style = (*ctx.style()).clone();
         style.visuals.panel_fill = Color32::from_rgb(0xf0, 0xf4, 0xf4);
         style.visuals.window_fill = Color32::WHITE;
@@ -853,6 +893,346 @@ impl CalculatorApp {
         }
     }
 
+    /// Checkpoint 7B: Authoritative 18-column Excel-style row component for Row 1.
+    pub fn ui_18col_row(&mut self, ui: &mut Ui, i: usize, is_target: bool) -> Option<Vec<usize>> {
+        let mut focused_path = None;
+        let row_h = 96.0;
+        let subrow_top = 26.0;
+
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+
+            // 1. Col A (1): Row identification badge (width 160)
+            let col_a_w = excel_18col_effective_column_width(COL_A_ROW_LABEL);
+            fixed_col(ui, col_a_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                ui.add_space(14.0);
+                let badge_bg = if is_target { ROW_BADGE_ACTIVE } else { ROW_BADGE_BG };
+                let title = format!("Row {}", i + 1);
+                let btn = Button::new(RichText::new(title).size(13.0).strong().color(ROW_BADGE_FG))
+                    .fill(badge_bg)
+                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0x8a, 0xb8, 0x80)))
+                    .rounding(2.0);
+                if ui.add_sized(egui::vec2(78.0, 28.0), btn).clicked() {
+                    self.doc.target_row = i;
+                    self.doc.target_path = self.doc.rows[i].first_box();
+                }
+                if let Some(op) = self.doc.rows[i].operator() {
+                    ui.label(RichText::new(op.name).size(9.0).italics().color(ROW_BADGE_FG));
+                }
+            });
+
+            // 2. Col B (2): Spacer AB (width 10)
+            let col_b_w = excel_18col_effective_column_width(COL_B_SPACER_AB);
+            ui.add_space(col_b_w);
+
+            // 3. Col C (3): Mathematical join region (width 42)
+            let col_c_w = excel_18col_effective_column_width(COL_C_MATH_SIGN);
+            fixed_col(ui, col_c_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                if i > 0 && !self.doc.rows[i].is_result {
+                    ui.add_space(subrow_top + 6.0);
+                    let sym = self.doc.rows[i].join.symbol();
+                    let display_sym = if sym.is_empty() { "□" } else { sym };
+                    let btn = Button::new(RichText::new(display_sym).size(14.0).strong().color(Color32::BLACK))
+                        .fill(Color32::from_rgb(0xfb, 0xd3, 0x4d))
+                        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0xd0, 0xa0, 0x20)))
+                        .rounding(2.0);
+                    if ui.add_sized(egui::vec2(32.0, 32.0), btn).clicked() {
+                        self.doc.target_row = i;
+                        self.doc.rows[i].join = match self.doc.rows[i].join {
+                            Join::None => Join::Add,
+                            Join::Add => Join::Sub,
+                            Join::Sub => Join::Mul,
+                            Join::Mul => Join::Div,
+                            Join::Div => Join::Eq,
+                            Join::Eq => Join::Then,
+                            _ => Join::None,
+                        };
+                        self.doc.rows[i].clear_result();
+                    }
+                } else {
+                    // Blank spacer for Row 1
+                    ui.add_space(row_h);
+                }
+            });
+
+            // 4. Col D (4): Spacer CD (width 10)
+            let col_d_w = excel_18col_effective_column_width(COL_D_SPACER_CD);
+            ui.add_space(col_d_w);
+
+            // 5. Col E (5): Main mathematical input (width 114)
+            let col_e_w = excel_18col_effective_column_width(COL_E_NUMBER_MATH);
+            let target_path = self.doc.target_path.clone();
+            if self.doc.rows[i].flatten().is_empty() {
+                fixed_col(ui, col_e_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.add_space(subrow_top + 4.0);
+                    if self.doc.rows[i].inputs.is_empty() {
+                        self.doc.rows[i].inputs.push(String::new());
+                    }
+                    let num_text = self.doc.rows[i].inputs.first().map(|s| s.as_str()).unwrap_or("");
+                    let display_num = if num_text.is_empty() { "□" } else { num_text };
+                    let (bg, stroke) = if is_target {
+                        (Color32::from_rgb(0xde, 0xee, 0xfc), egui::Stroke::new(2.0, Color32::from_rgb(0x1e, 0x88, 0xe5)))
+                    } else {
+                        (Color32::WHITE, egui::Stroke::new(1.0, Color32::from_rgb(0x88, 0x88, 0x88)))
+                    };
+                    let btn = Button::new(RichText::new(display_num).size(14.0).strong().color(Color32::BLACK))
+                        .fill(bg)
+                        .stroke(stroke)
+                        .rounding(2.0);
+                    if ui.add_sized(egui::vec2(100.0, 36.0), btn).clicked() {
+                        self.doc.target_row = i;
+                        self.doc.target_path = vec![0];
+                        self.doc.rows[i].ensure_number_box();
+                    }
+                });
+            } else {
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(col_e_w, row_h), egui::Sense::hover());
+                let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(egui::Layout::top_down(egui::Align::Center)));
+                child.add_space(subrow_top + 4.0);
+                ScrollArea::horizontal()
+                    .id_salt(("math_slot_18col", i))
+                    .auto_shrink([false, false])
+                    .show(&mut child, |ui| {
+                        focused_path = self.ui_formula(ui, i, is_target, &target_path);
+                    });
+            }
+
+            // 6. Col F (6): Description input (width 140)
+            let col_f_w = excel_18col_effective_column_width(COL_F_MATH_BOX1);
+            fixed_col(ui, col_f_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                ui.add_space(subrow_top + 9.0);
+                if self.doc.rows[i].math_descriptions.is_empty() {
+                    self.doc.rows[i].math_descriptions.push(String::new());
+                }
+                for (idx, desc) in self.doc.rows[i].math_descriptions.iter_mut().enumerate() {
+                    let hint = if idx == 0 {
+                        "Descriptive Text Box 1".to_string()
+                    } else {
+                        format!("Descriptive Text Box {}", idx + 1)
+                    };
+                    ui.add_sized(
+                        egui::vec2(136.0, 26.0),
+                        egui::TextEdit::singleline(desc).hint_text(hint),
+                    );
+                }
+            });
+
+            // 7. Col G (7): Orange + control (math) (width 42)
+            let col_g_w = excel_18col_column_width(COL_G_MATH_TRAILING);
+            fixed_col(ui, col_g_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                ui.add_space(subrow_top + 8.0);
+                let btn = Button::new(RichText::new("+").size(14.0).strong().color(Color32::WHITE))
+                    .fill(Color32::from_rgb(0xf3, 0x9c, 0x12))
+                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0xd9, 0x77, 0x06)))
+                    .rounding(2.0);
+                if ui.add_sized(egui::vec2(28.0, 28.0), btn).clicked() {
+                    self.doc.rows[i].add_math_description();
+                    self.status = format!(
+                        "Row {}: Added descriptive box {}.",
+                        i + 1,
+                        self.doc.rows[i].math_descriptions.len()
+                    );
+                }
+            });
+
+            // 8. Col H (8): Spacer GH (width 10)
+            let col_h_w = excel_18col_effective_column_width(COL_H_SPACER_GH);
+            ui.add_space(col_h_w);
+
+            // 9. Col I (9): Mathematical operation controls (width 130)
+            let col_i_w = excel_18col_effective_column_width(COL_I_ACTIONS);
+            fixed_col(ui, col_i_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                ui.add_space(2.0);
+                // Top button: "math to put on the left"
+                egui::Frame::none()
+                    .fill(Color32::BLACK)
+                    .inner_margin(egui::Margin::same(2.0))
+                    .show(ui, |ui| {
+                        let btn = Button::new(
+                            RichText::new("math to put
+on the left")
+                                .size(9.5)
+                                .strong()
+                                .color(Color32::BLACK),
+                        )
+                        .fill(Color32::WHITE)
+                        .rounding(0.0);
+                        if ui.add_sized(egui::vec2(118.0, 30.0), btn).clicked() {
+                            self.doc.target_row = i;
+                            self.show_ops = true;
+                        }
+                    });
+
+                ui.add_space(14.0);
+
+                // Bottom button: "clear math on the left"
+                let clr_btn = Button::new(
+                    RichText::new("clear math on the left")
+                        .size(9.5)
+                        .strong()
+                        .color(CLEAR_MATH_FG),
+                )
+                .fill(CLEAR_MATH_BG)
+                .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0xe0, 0xa0, 0xa0)))
+                .rounding(2.0);
+                if ui.add_sized(egui::vec2(122.0, 26.0), clr_btn).clicked() {
+                    self.doc.clear_row_math(i);
+                    self.doc.template = None;
+                }
+            });
+
+            // 10. Col J (10): Equals control (=) (width 42)
+            let col_j_w = excel_18col_effective_column_width(COL_J_RESULT_EQUALS);
+            fixed_col(ui, col_j_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                ui.add_space(subrow_top + 6.0);
+                ui.label(RichText::new("=").size(22.0).strong().color(Color32::BLACK));
+            });
+
+            // 11. Col K (11): Blue + parentheses expansion control (width 36)
+            let col_k_w = excel_18col_effective_column_width(COL_K_PAREN_PLUS);
+            fixed_col(ui, col_k_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                ui.add_space(subrow_top + 7.0);
+                let btn = Button::new(RichText::new("+").size(14.0).strong().color(Color32::WHITE))
+                    .fill(Color32::from_rgb(0x1e, 0x88, 0xe5))
+                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0x15, 0x65, 0xc0)))
+                    .rounding(2.0);
+                if ui.add_sized(egui::vec2(30.0, 30.0), btn).clicked() {
+                    self.doc.rows[i].add_paren_pair();
+                    self.doc.sync_closing_parentheses_capacity();
+                    self.status = format!(
+                        "Row {}: Added parenthesis pair {}. Total pairs on this row: {}.",
+                        i + 1,
+                        self.doc.rows[i].paren_pairs_count,
+                        self.doc.rows[i].paren_pairs_count
+                    );
+                }
+            });
+
+            // 12. Col L (12): Opening parenthesis button(s) (width 36 each)
+            let col_l_w = excel_18col_effective_column_width(COL_L_PAREN_OPEN);
+            let pairs_count = self.doc.rows[i].paren_pairs_count.max(1);
+            for p in 0..pairs_count {
+                fixed_col(ui, col_l_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.add_space(subrow_top + 7.0);
+                    let is_active = self.doc.rows[i].paren_open_states.get(p).copied().unwrap_or(false);
+                    let (bg, fg, stroke) = if is_active {
+                        (Color32::from_rgb(0xb5, 0xdc, 0xa8), Color32::from_rgb(0x1b, 0x5e, 0x20), egui::Stroke::new(1.5, Color32::from_rgb(0x2a, 0x6a, 0x20)))
+                    } else {
+                        (Color32::WHITE, Color32::BLACK, egui::Stroke::new(1.0, Color32::from_rgb(0x88, 0x88, 0x88)))
+                    };
+                    let btn = Button::new(RichText::new("(").size(14.0).strong().color(fg))
+                        .fill(bg)
+                        .stroke(stroke)
+                        .rounding(2.0);
+                    if ui.add_sized(egui::vec2(30.0, 30.0), btn).clicked() {
+                        self.doc.rows[i].toggle_paren_open(p);
+                        self.doc.sync_closing_parentheses_capacity();
+                    }
+                });
+            }
+
+            // 13. Col M (13): Mathematical result box (width 110)
+            let col_m_w = excel_18col_effective_column_width(COL_M_RESULT_BOX);
+            fixed_col(ui, col_m_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                ui.add_space(subrow_top + 6.0);
+                let res_text = if self.doc.rows[i].result.is_empty() { "□" } else { &self.doc.rows[i].result };
+                let btn = Button::new(RichText::new(res_text).size(14.0).strong().color(Color32::BLACK))
+                    .fill(Color32::from_rgb(0xde, 0xee, 0xfc))
+                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0x60, 0x80, 0xa0)))
+                    .rounding(2.0);
+                if ui.add_sized(egui::vec2(100.0, 32.0), btn).clicked() {
+                    self.doc.target_row = i;
+                }
+            });
+
+            // 14. Col N (14): Individual row exponent box 1 (superscript in subrow 0) (width 48)
+            let col_n_w = excel_18col_effective_column_width(COL_N_EXPONENT_1);
+            fixed_col(ui, col_n_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                ui.add_space(2.0);
+                ui.add_sized(
+                    egui::vec2(44.0, 22.0),
+                    egui::TextEdit::singleline(&mut self.doc.rows[i].exponent_1).hint_text("exp"),
+                );
+            });
+
+            // 15 & 16. Col O (15) & Col P (16): Closing parenthesis and paired group exponent box
+            let col_o_w = excel_18col_effective_column_width(COL_O_PAREN_CLOSE);
+            let col_p_w = excel_18col_effective_column_width(COL_P_EXPONENT_2);
+            for p in 0..pairs_count {
+                // Col O: Closing parenthesis
+                fixed_col(ui, col_o_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.add_space(subrow_top + 7.0);
+                    let is_active = self.doc.rows[i].paren_close_states.get(p).copied().unwrap_or(false);
+                    let (bg, fg, stroke) = if is_active {
+                        (Color32::from_rgb(0xb5, 0xdc, 0xa8), Color32::from_rgb(0x1b, 0x5e, 0x20), egui::Stroke::new(1.5, Color32::from_rgb(0x2a, 0x6a, 0x20)))
+                    } else {
+                        (Color32::WHITE, Color32::BLACK, egui::Stroke::new(1.0, Color32::from_rgb(0x88, 0x88, 0x88)))
+                    };
+                    let btn = Button::new(RichText::new(")").size(14.0).strong().color(fg))
+                        .fill(bg)
+                        .stroke(stroke)
+                        .rounding(2.0);
+                    if ui.add_sized(egui::vec2(30.0, 30.0), btn).clicked() {
+                        self.doc.rows[i].toggle_paren_close(p);
+                        self.doc.sync_closing_parentheses_capacity();
+                    }
+                });
+
+                // Col P: Group Exponent Box (superscript in subrow 0)
+                fixed_col(ui, col_p_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                    ui.add_space(2.0);
+                    if p >= self.doc.rows[i].exponent_2_boxes.len() {
+                        self.doc.rows[i].exponent_2_boxes.resize(p + 1, String::new());
+                    }
+                    ui.add_sized(
+                        egui::vec2(44.0, 22.0),
+                        egui::TextEdit::singleline(&mut self.doc.rows[i].exponent_2_boxes[p]).hint_text("exp"),
+                    );
+                });
+            }
+
+            // 17. Col Q (17): Result description input (width 140)
+            let col_q_w = excel_18col_effective_column_width(COL_Q_RESULT_BOX1);
+            fixed_col(ui, col_q_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                ui.add_space(subrow_top + 9.0);
+                if self.doc.rows[i].result_descriptions.is_empty() {
+                    self.doc.rows[i].result_descriptions.push(String::new());
+                }
+                for (idx, desc) in self.doc.rows[i].result_descriptions.iter_mut().enumerate() {
+                    let hint = if idx == 0 {
+                        "Descriptive Text Box 1".to_string()
+                    } else {
+                        format!("Descriptive Text Box {}", idx + 1)
+                    };
+                    ui.add_sized(
+                        egui::vec2(136.0, 26.0),
+                        egui::TextEdit::singleline(desc).hint_text(hint),
+                    );
+                }
+            });
+
+            // 18. Col R (18): Orange + control (result) (width 42)
+            let col_r_w = excel_18col_column_width(COL_R_RESULT_TRAILING);
+            fixed_col(ui, col_r_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
+                ui.add_space(subrow_top + 8.0);
+                let btn = Button::new(RichText::new("+").size(14.0).strong().color(Color32::WHITE))
+                    .fill(Color32::from_rgb(0xf3, 0x9c, 0x12))
+                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0xd9, 0x77, 0x06)))
+                    .rounding(2.0);
+                if ui.add_sized(egui::vec2(28.0, 28.0), btn).clicked() {
+                    self.doc.rows[i].add_result_description();
+                    self.status = format!(
+                        "Row {}: Added result descriptive box {}.",
+                        i + 1,
+                        self.doc.rows[i].result_descriptions.len()
+                    );
+                }
+            });
+        });
+
+        focused_path
+    }
+
     fn ui_rows(&mut self, ui: &mut Ui, viewport_w: f32) {
         // Fixed grid like Tkinter:
         // col0 minsize=170 | col1 minsize=430 | col2 weight=1 (math) | col3 actions | col4 result
@@ -861,7 +1241,8 @@ impl CalculatorApp {
         let result_card_w = COL_RESULT;
         let math_w = (viewport_w - COL_ROW - COL_HELPER - COL_ACTIONS - result_card_w - 16.0)
             .clamp(MATH_SLOT_MIN_W, MATH_SLOT_MAX_W);
-        let content_w = COL_ROW + COL_HELPER + math_w + COL_ACTIONS + result_card_w + 8.0;
+        let content_w = (COL_ROW + COL_HELPER + math_w + COL_ACTIONS + result_card_w + 8.0)
+            .max(crate::gui_coordinates::excel_18col_effective_total_width() + 32.0);
 
         // Header bar matching Tkinter:
         // header = tk.Frame(self, bg="#e4e4e4")
@@ -893,13 +1274,7 @@ impl CalculatorApp {
                 ui.set_min_width(content_w);
                 // Scroll only this canvas (not the outer page). Explicit Y offset avoids nested
                 // scroll_to_me leaking into ScrollArea::both above.
-                let scroll_y = self.rows_scroll_to.take().map(|i| {
-                    let mut y = 0.0;
-                    for k in 0..i {
-                        y += if k == 0 { MATH_SLOT_H + 8.0 } else { MATH_SLOT_H + 24.0 };
-                    }
-                    y
-                });
+                let scroll_y = self.rows_scroll_to.take().map(|i| (i as f32) * (96.0 + 8.0));
                 let mut rows_scroll = ScrollArea::both()
                     .id_salt("rows_canvas")
                     .max_height(ROWS_CANVAS_H)
@@ -911,237 +1286,10 @@ impl CalculatorApp {
                         ui.set_min_width(content_w - 8.0);
                         for i in 0..self.doc.rows.len() {
                             let is_target = i == self.doc.target_row;
-                            let row_h = if i == 0 { MATH_SLOT_H + 8.0 } else { MATH_SLOT_H + 24.0 };
-                            ui.horizontal_top(|ui| {
-                                ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
-
-                                // Column 0: Row badge — exact width
-                                fixed_col(ui, COL_ROW, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
-                                    ui.add_space(10.0);
-                                    let badge_bg = if is_target { ROW_BADGE_ACTIVE } else { ROW_BADGE_BG };
-                                    let title = if self.doc.rows[i].is_result {
-                                        "Result".to_string()
-                                    } else {
-                                        format!("Row {}", i + 1)
-                                    };
-                                    let btn = Button::new(RichText::new(title).size(14.0).strong().color(ROW_BADGE_FG))
-                                        .fill(badge_bg)
-                                        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0x8a, 0xb8, 0x80)))
-                                        .rounding(2.0);
-                                    if ui.add_sized(egui::vec2(78.0, 28.0), btn).clicked() {
-                                        self.doc.target_row = i;
-                                        self.doc.target_path = self.doc.rows[i].first_box();
-                                    }
-                                    if let Some(t) = self.doc.template {
-                                        if let Some(rs) = t.spec.rows.get(i) {
-                                            ui.label(RichText::new(rs.title).size(10.0).italics().color(ROW_BADGE_FG));
-                                        }
-                                    }
-                                    if self.doc.rows[i].is_result {
-                                        ui.label(RichText::new("(the answer)").size(9.0).italics().color(ROW_BADGE_FG));
-                                    } else if let Some(op) = self.doc.rows[i].operator() {
-                                        ui.label(RichText::new(op.name).size(9.0).italics().color(ROW_BADGE_FG));
-                                    }
-                                });
-
-                                // Column 1: helper / join — exact width so Row 1 and Row 2 math start at the same X
-                                fixed_col(ui, COL_HELPER, row_h, egui::Layout::top_down(egui::Align::Min), |ui| {
-                                    if i == 0 {
-                                        ui.add_space(4.0);
-                                        ui.label(
-                                            RichText::new("math operator to join rows 1 and 2")
-                                                .size(12.0)
-                                                .color(Color32::from_rgb(0x33, 0x33, 0x33)),
-                                        );
-                                        ui.add_space(2.0);
-                                        ui.horizontal(|ui| {
-                                            ui.add_space(40.0);
-                                            draw_down_arrow(ui);
-                                        });
-                                    } else if !self.doc.rows[i].is_result {
-                                        fixed_col(
-                                            ui,
-                                            COL_HELPER,
-                                            ROW_CARD_TOP - CARD_FRAME_INSET,
-                                            egui::Layout::top_down(egui::Align::Min),
-                                            |ui| {
-                                                ui.label(
-                                                    RichText::new("helper card (slot 1)")
-                                                        .size(13.0)
-                                                        .strong()
-                                                        .color(Color32::from_rgb(0xb0, 0x30, 0x10)),
-                                                );
-                                            },
-                                        );
-                                        let join_sym = self.doc.rows[i].join.symbol();
-                                        let center = if join_sym.is_empty() { "□" } else { join_sym };
-                                        let mut l = String::new();
-                                        let mut c = String::new();
-                                        let (lead_clk, center_clk) = draw_standalone_card(
-                                            ui,
-                                            "+",
-                                            center,
-                                            "helper",
-                                            false,
-                                            &mut l,
-                                            "[Label]",
-                                            &mut c,
-                                            "[Context]",
-                                        );
-                                        if lead_clk || center_clk {
-                                            self.doc.target_row = i;
-                                            if center_clk {
-                                                self.doc.rows[i].join = match self.doc.rows[i].join {
-                                                    Join::None => Join::Add,
-                                                    Join::Add => Join::Sub,
-                                                    Join::Sub => Join::Mul,
-                                                    Join::Mul => Join::Div,
-                                                    Join::Div => Join::Eq,
-                                                    Join::Eq => Join::Then,
-                                                    _ => Join::None,
-                                                };
-                                                self.doc.rows[i].clear_result();
-                                            }
-                                        }
-                                    } else {
-                                        ui.label(RichText::new("result").size(11.0).strong().color(ROW_BADGE_FG));
-                                        let mut l = String::new();
-                                        let mut c = String::new();
-                                        draw_standalone_card(
-                                            ui,
-                                            "=",
-                                            "=",
-                                            "helper",
-                                            false,
-                                            &mut l,
-                                            "[Label]",
-                                            &mut c,
-                                            "[Context]",
-                                        );
-                                    }
-                                });
-
-                                // Column 2: white math slot — fixed column width; inner H-scroll so wide formulas aren't clipped
-                                let target_path = self.doc.target_path.clone();
-                                let mut focused = None;
-                                fixed_col(ui, math_w, row_h, egui::Layout::left_to_right(egui::Align::Min), |ui| {
-                                    egui::Frame::none()
-                                        .fill(Color32::WHITE)
-                                        .inner_margin(egui::Margin::same(MATH_SLOT_INSET))
-                                        .show(ui, |ui| {
-                                            ui.set_min_height(MATH_SLOT_H - 8.0);
-                                            if !self.doc.rows[i].is_result {
-                                                ui.add_space(ROW_CARD_TOP - MATH_SLOT_INSET - CARD_FRAME_INSET);
-                                            }
-                                            ScrollArea::horizontal()
-                                                .id_salt(("math_slot", i))
-                                                .auto_shrink([false, false])
-                                                .show(ui, |ui| {
-                                            if self.doc.rows[i].is_result {
-                                                let mut l = String::new();
-                                                let mut c = String::new();
-                                                draw_standalone_card(
-                                                    ui,
-                                                    "=",
-                                                    &self.doc.rows[i].result,
-                                                    "number",
-                                                    false,
-                                                    &mut l,
-                                                    "[Item]",
-                                                    &mut c,
-                                                    "[Context]",
-                                                );
-                                            } else if self.doc.rows[i].flatten().is_empty() {
-                                                let mut l = String::new();
-                                                let mut c = String::new();
-                                                let (lead_clk, center_clk) = draw_standalone_card(
-                                                    ui,
-                                                    "+",
-                                                    self.doc.rows[i].inputs.first().map(|s| s.as_str()).unwrap_or("□"),
-                                                    "number",
-                                                    is_target,
-                                                    &mut l,
-                                                    "[Item]",
-                                                    &mut c,
-                                                    "[Context]",
-                                                );
-                                                if lead_clk || center_clk {
-                                                    self.doc.target_row = i;
-                                                    self.doc.target_path = vec![0];
-                                                    self.doc.rows[i].ensure_number_box();
-                                                }
-                                            } else {
-                                                focused = self.ui_formula(ui, i, is_target, &target_path);
-                                            }
-                                                });
-                                        });
-                                });
-
-                                if let Some(b) = focused {
-                                    self.doc.target_row = i;
-                                    self.doc.target_path = b;
-                                }
-
-                                // Column 3: actions
-                                fixed_col(ui, COL_ACTIONS, row_h, egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                                    ui.horizontal(|ui| {
-                                        ui.label(RichText::new("=").size(26.0).strong().color(Color32::BLACK));
-                                        ui.vertical(|ui| {
-                                            egui::Frame::none()
-                                                .fill(Color32::BLACK)
-                                                .inner_margin(egui::Margin::same(3.0))
-                                                .show(ui, |ui| {
-                                                    let btn = Button::new(
-                                                        RichText::new("math to put\non the left")
-                                                            .size(10.0)
-                                                            .strong()
-                                                            .color(Color32::BLACK),
-                                                    )
-                                                    .fill(Color32::WHITE)
-                                                    .rounding(0.0);
-                                                    if ui.add_sized(egui::vec2(118.0, 36.0), btn).clicked() {
-                                                        self.doc.target_row = i;
-                                                        self.show_ops = true;
-                                                    }
-                                                });
-                                            ui.add_space(6.0);
-                                            let clr_btn = Button::new(
-                                                RichText::new("clear math on the left")
-                                                    .size(10.0)
-                                                    .strong()
-                                                    .color(CLEAR_MATH_FG),
-                                            )
-                                            .fill(CLEAR_MATH_BG)
-                                            .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0xe0, 0xa0, 0xa0)))
-                                            .rounding(2.0);
-                                            if ui.add_sized(egui::vec2(124.0, 28.0), clr_btn).clicked() {
-                                                self.doc.clear_row_math(i);
-                                                self.doc.template = None;
-                                            }
-                                        });
-                                    });
-                                });
-
-                                // Column 4: result card (=)
-                                if !self.doc.rows[i].is_result {
-                                    let mut l = String::new();
-                                    let mut c = String::new();
-                                    fixed_col(ui, result_card_w, row_h, egui::Layout::top_down(egui::Align::Min), |ui| {
-                                        ui.add_space(ROW_CARD_TOP - CARD_FRAME_INSET);
-                                        draw_standalone_card(
-                                            ui,
-                                            "=",
-                                            &self.doc.rows[i].result,
-                                            "number",
-                                            false,
-                                            &mut l,
-                                            "[Item]",
-                                            &mut c,
-                                            "[Context]",
-                                        );
-                                    });
-                                }
-                            });
+                            if let Some(path) = self.ui_18col_row(ui, i, is_target) {
+                                self.doc.target_row = i;
+                                self.doc.target_path = path;
+                            }
 
                             if let Some(note) = self.doc.rows[i].op_key.as_deref().map(crate::layout::note).filter(|n| !n.is_empty()) {
                                 ui.label(RichText::new(note).italics().weak());
@@ -1564,6 +1712,7 @@ fn fixed_col<R>(ui: &mut Ui, w: f32, h: f32, layout: egui::Layout, add: impl FnO
     add(&mut child)
 }
 
+#[allow(dead_code)]
 fn draw_down_arrow(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(egui::vec2(70.0, 80.0), egui::Sense::hover());
     let origin = rect.min;
@@ -1660,6 +1809,7 @@ fn fit_word_widths(budget: f32) -> (f32, f32) {
 }
 
 /// Item/Context side-by-side and vertically centred with the 3×3 arrows (Tkinter `make_component`).
+#[allow(dead_code)]
 fn draw_word_boxes(
     ui: &mut Ui,
     label: &mut String,
@@ -1724,6 +1874,7 @@ fn draw_card_shell(
     lead_resp.expect("lead button response")
 }
 
+#[allow(dead_code)]
 fn draw_standalone_card(
     ui: &mut Ui,
     lead: &str,

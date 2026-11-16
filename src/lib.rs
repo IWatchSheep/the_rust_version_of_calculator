@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod expr;
+pub mod gui_coordinates;
 pub mod kinds;
 pub mod layout;
 pub mod layouts;
