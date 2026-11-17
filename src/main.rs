@@ -233,6 +233,77 @@ fn main() -> eframe::Result<()> {
                         // Checkpoint 7F Stage E: Clear restoring only Row 1
                         app.doc.clear();
                     }
+                    "7g_stage_a" => {
+                        // Checkpoint 7G Stage A: Row 1 with two active opening parentheses (( 2
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.add_paren_pair(0);
+                        app.doc.toggle_paren_open(0, 0);
+                        app.doc.toggle_paren_open(0, 1);
+                        app.doc.target_row = 0;
+                    }
+                    "7g_stage_b" => {
+                        // Checkpoint 7G Stage B: Row 2 with two closing parentheses and two independent group exponent boxes + 3
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.add_paren_pair(0);
+                        app.doc.toggle_paren_open(0, 0);
+                        app.doc.toggle_paren_open(0, 1);
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        app.doc.target_row = 1;
+                    }
+                    "7g_stage_c" => {
+                        // Checkpoint 7G Stage C: Row 2 closing both groups with exponent values 2 and 3: ((2 + 3)^2)^3
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.add_paren_pair(0);
+                        app.doc.toggle_paren_open(0, 0);
+                        app.doc.toggle_paren_open(0, 1);
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        app.doc.toggle_paren_close(1, 0);
+                        app.doc.toggle_paren_close(1, 1);
+                        if app.doc.rows[1].exponent_2_boxes.len() < 2 {
+                            app.doc.rows[1].exponent_2_boxes.resize(2, String::new());
+                        }
+                        app.doc.rows[1].exponent_2_boxes[0] = "2".to_string();
+                        app.doc.rows[1].exponent_2_boxes[1] = "3".to_string();
+                        app.doc.target_row = 1;
+                    }
+                    "7g_stage_d" => {
+                        // Checkpoint 7G Stage D: Total displaying 15625 in Column M
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.add_paren_pair(0);
+                        app.doc.toggle_paren_open(0, 0);
+                        app.doc.toggle_paren_open(0, 1);
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        app.doc.toggle_paren_close(1, 0);
+                        app.doc.toggle_paren_close(1, 1);
+                        if app.doc.rows[1].exponent_2_boxes.len() < 2 {
+                            app.doc.rows[1].exponent_2_boxes.resize(2, String::new());
+                        }
+                        app.doc.rows[1].exponent_2_boxes[0] = "2".to_string();
+                        app.doc.rows[1].exponent_2_boxes[1] = "3".to_string();
+                        let _ = app.doc.equals_all();
+                        app.doc.target_row = 1;
+                    }
+                    "7g_stage_e" => {
+                        // Checkpoint 7G Stage E: Clear restoring only Row 1
+                        app.doc.clear();
+                    }
                     "3_rows_aligned" => {
                         // Row 1: 10
                         app.doc.rows[0].inputs = vec!["10".to_string()];

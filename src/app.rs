@@ -56,6 +56,12 @@ const CONTEXT_W: f32 = 140.0;
 const ITEM_W_MIN: f32 = 48.0;
 const CONTEXT_W_MIN: f32 = 72.0;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ActiveExponentTarget {
+    Exp1(usize),
+    Exp2(usize, usize),
+}
+
 pub struct CalculatorApp {
     pub doc: Document,
     pub status: String,
@@ -90,6 +96,7 @@ pub struct CalculatorApp {
     rows_follow_count: usize,
     pub screenshot_path: Option<std::path::PathBuf>,
     pub screenshot_frame_count: usize,
+    pub active_exponent: Option<ActiveExponentTarget>,
 }
 
 struct TplPreview {
@@ -157,6 +164,7 @@ impl Default for CalculatorApp {
             rows_follow_count: 1,
             screenshot_path: None,
             screenshot_frame_count: 0,
+            active_exponent: None,
         }
     }
 }
@@ -250,8 +258,15 @@ impl eframe::App for CalculatorApp {
                             egui::Key::Num8 => self.on_key("8"),
                             egui::Key::Num9 => self.on_key("9"),
                             egui::Key::Period => self.on_key("."),
-                            egui::Key::Backspace => self.doc.backspace(),
+                            egui::Key::Backspace => {
+                                if self.active_exponent.is_some() {
+                                    self.on_key("Backspace");
+                                } else {
+                                    self.doc.backspace();
+                                }
+                            }
                             egui::Key::Escape => {
+                                self.active_exponent = None;
                                 self.doc.clear();
                                 self.status = "Cleared. Click a square box and type a number, or open Operators.".into();
                             }
@@ -286,10 +301,12 @@ impl eframe::App for CalculatorApp {
                 ui.heading(RichText::new("Smart Token Expression Builder (Math Templates)").strong().size(13.0));
                 ui.add_space(8.0);
                 if colored_btn(ui, "Clear (C)", RED).clicked() {
+                    self.active_exponent = None;
                     self.doc.clear();
                     self.status = "Cleared. Click a square box and type a number, or open Operators.".into();
                 }
                 if colored_btn(ui, "Next Row (↓)", GREEN).clicked() {
+                    self.active_exponent = None;
                     self.doc.next_row();
                     self.status = format!("Row {} ready.", self.doc.target_row + 1);
                 }
@@ -1198,6 +1215,7 @@ impl CalculatorApp {
                     .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0x60, 0x80, 0xa0)))
                     .rounding(1.0);
                 if ui.add_sized(egui::vec2(100.0, 32.0), btn).clicked() {
+                    self.active_exponent = None;
                     self.doc.target_row = i;
                 }
             });
@@ -1206,18 +1224,27 @@ impl CalculatorApp {
             let col_n_w = excel_18col_effective_column_width(COL_N_EXPONENT_1);
             fixed_col(ui, col_n_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
                 ui.add_space(6.0);
+                let is_active_exp = self.active_exponent == Some(ActiveExponentTarget::Exp1(i));
+                let stroke = if is_active_exp {
+                    egui::Stroke::new(1.5, Color32::from_rgb(0x1e, 0x88, 0xe5))
+                } else {
+                    egui::Stroke::new(1.0, Color32::from_rgb(0x70, 0x70, 0x70))
+                };
                 egui::Frame::none()
                     .fill(Color32::WHITE)
-                    .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0x70, 0x70, 0x70)))
+                    .stroke(stroke)
                     .rounding(0.0)
                     .inner_margin(egui::Margin::symmetric(2.0, 1.0))
                     .show(ui, |ui| {
-                        ui.add_sized(
+                        let resp = ui.add_sized(
                             egui::vec2(28.0, 18.0),
                             egui::TextEdit::singleline(&mut self.doc.rows[i].exponent_1)
                                 .frame(false)
                                 .text_color(Color32::BLACK),
                         );
+                        if resp.gained_focus() || resp.clicked() {
+                            self.active_exponent = Some(ActiveExponentTarget::Exp1(i));
+                        }
                     });
             });
 
@@ -1250,18 +1277,27 @@ impl CalculatorApp {
                     if p >= self.doc.rows[i].exponent_2_boxes.len() {
                         self.doc.rows[i].exponent_2_boxes.resize(p + 1, String::new());
                     }
+                    let is_active_exp = self.active_exponent == Some(ActiveExponentTarget::Exp2(i, p));
+                    let stroke = if is_active_exp {
+                        egui::Stroke::new(1.5, Color32::from_rgb(0x1e, 0x88, 0xe5))
+                    } else {
+                        egui::Stroke::new(1.0, Color32::from_rgb(0x70, 0x70, 0x70))
+                    };
                     egui::Frame::none()
                         .fill(Color32::WHITE)
-                        .stroke(egui::Stroke::new(1.0, Color32::from_rgb(0x70, 0x70, 0x70)))
+                        .stroke(stroke)
                         .rounding(0.0)
                         .inner_margin(egui::Margin::symmetric(2.0, 1.0))
                         .show(ui, |ui| {
-                            ui.add_sized(
+                            let resp = ui.add_sized(
                                 egui::vec2(28.0, 18.0),
                                 egui::TextEdit::singleline(&mut self.doc.rows[i].exponent_2_boxes[p])
                                     .frame(false)
                                     .text_color(Color32::BLACK),
                             );
+                            if resp.gained_focus() || resp.clicked() {
+                                self.active_exponent = Some(ActiveExponentTarget::Exp2(i, p));
+                            }
                         });
                 });
             }
@@ -1372,6 +1408,7 @@ impl CalculatorApp {
                         for i in 0..self.doc.rows.len() {
                             let is_target = i == self.doc.target_row;
                             if let Some(path) = self.ui_18col_row(ui, i, is_target) {
+                                self.active_exponent = None;
                                 self.doc.target_row = i;
                                 self.doc.target_path = path;
                             }
@@ -1500,6 +1537,7 @@ impl CalculatorApp {
             if ui.add_sized(btn_sz, Button::new("(").fill(PALE_BLUE)).clicked() { self.on_key("("); }
             if ui.add_sized(btn_sz, Button::new(")").fill(PALE_BLUE)).clicked() { self.on_key(")"); }
             if ui.add_sized(btn_sz, Button::new(RichText::new("C").color(Color32::WHITE).strong()).fill(RED)).clicked() {
+                self.active_exponent = None;
                 self.doc.clear();
                 self.status = "Cleared. Click a square box and type a number, or open Operators.".into();
             }
@@ -1513,6 +1551,7 @@ impl CalculatorApp {
             if ui.add_sized(btn_sz, Button::new("8").fill(Color32::from_rgb(0xe8, 0xe8, 0xe8))).clicked() { self.on_key("8"); }
             if ui.add_sized(btn_sz, Button::new("9").fill(Color32::from_rgb(0xe8, 0xe8, 0xe8))).clicked() { self.on_key("9"); }
             if ui.add_sized(wide_sz, Button::new("Next Row (↓)").fill(Color32::from_rgb(0xe8, 0xe8, 0xe8))).clicked() {
+                self.active_exponent = None;
                 self.doc.next_row();
                 self.status = format!("Row {} ready.", self.doc.target_row + 1);
             }
@@ -1542,7 +1581,13 @@ impl CalculatorApp {
                     ui.spacing_mut().item_spacing = egui::vec2(3.0, 3.0);
                     if ui.add_sized(btn_sz, Button::new("0").fill(Color32::from_rgb(0xe8, 0xe8, 0xe8))).clicked() { self.on_key("0"); }
                     if ui.add_sized(btn_sz, Button::new(".").fill(Color32::from_rgb(0xe8, 0xe8, 0xe8))).clicked() { self.on_key("."); }
-                    if ui.add_sized(btn_sz, Button::new("Backspace").fill(Color32::from_rgb(0xe8, 0xe8, 0xe8))).clicked() { self.doc.backspace(); }
+                    if ui.add_sized(btn_sz, Button::new("Backspace").fill(Color32::from_rgb(0xe8, 0xe8, 0xe8))).clicked() {
+                if self.active_exponent.is_some() {
+                    self.on_key("Backspace");
+                } else {
+                    self.doc.backspace();
+                }
+            }
                 });
             });
 
@@ -1694,6 +1739,74 @@ impl CalculatorApp {
     }
 
     pub fn on_key(&mut self, key: &str) {
+        if let Some(target) = self.active_exponent {
+            match target {
+                ActiveExponentTarget::Exp1(r) => {
+                    if r < self.doc.rows.len() {
+                        let s = &mut self.doc.rows[r].exponent_1;
+                        match key {
+                            "⌫" | "Backspace" => { s.pop(); }
+                            "±" => {
+                                if let Some(rest) = s.strip_prefix('-') {
+                                    *s = rest.to_string();
+                                } else if !s.is_empty() {
+                                    s.insert(0, '-');
+                                } else {
+                                    s.push('-');
+                                }
+                            }
+                            "." => {
+                                if !s.contains('.') {
+                                    s.push('.');
+                                }
+                            }
+                            "/" => {
+                                if !s.contains('/') {
+                                    s.push('/');
+                                }
+                            }
+                            d if d.len() == 1 && d.chars().next().unwrap().is_ascii_digit() => {
+                                s.push_str(d);
+                            }
+                            _ => {}
+                        }
+                        return;
+                    }
+                }
+                ActiveExponentTarget::Exp2(r, p) => {
+                    if r < self.doc.rows.len() && p < self.doc.rows[r].exponent_2_boxes.len() {
+                        let s = &mut self.doc.rows[r].exponent_2_boxes[p];
+                        match key {
+                            "⌫" | "Backspace" => { s.pop(); }
+                            "±" => {
+                                if let Some(rest) = s.strip_prefix('-') {
+                                    *s = rest.to_string();
+                                } else if !s.is_empty() {
+                                    s.insert(0, '-');
+                                } else {
+                                    s.push('-');
+                                }
+                            }
+                            "." => {
+                                if !s.contains('.') {
+                                    s.push('.');
+                                }
+                            }
+                            "/" => {
+                                if !s.contains('/') {
+                                    s.push('/');
+                                }
+                            }
+                            d if d.len() == 1 && d.chars().next().unwrap().is_ascii_digit() => {
+                                s.push_str(d);
+                            }
+                            _ => {}
+                        }
+                        return;
+                    }
+                }
+            }
+        }
         match key {
             "±" => {
                 self.doc.ensure_target();

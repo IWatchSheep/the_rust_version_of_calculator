@@ -2,6 +2,7 @@
 
 use crate::operator::Operator;
 use crate::ops;
+use crate::gui_coordinates::excel_18col_column_letter;
 use crate::value::Value;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -143,6 +144,92 @@ pub fn eval_pemdas(operands: &[Value], operators: &[Join]) -> Result<Value, Stri
     }
 
     val_stack.pop().ok_or_else(|| "No result".to_string())
+}
+
+/// Parse text from an exponent box (Exponent Box 1 in Column N or Exponent Box 2 in Column P).
+/// Supports:
+///   - Integers: '3', '0', '-2'
+///   - Floats: '0.5', '-1.5'
+///   - Fractions: '1/2', '1/3', '-1/4'
+/// Returns Ok(Some(f64)), Ok(None) if empty, or Err on invalid syntax or division by zero.
+pub fn parse_exponent_value(s: &str) -> Result<Option<f64>, String> {
+    let text = s.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    if let Ok(v) = text.parse::<i64>() {
+        return Ok(Some(v as f64));
+    }
+    if let Ok(v) = text.parse::<f64>() {
+        if v.is_finite() {
+            return Ok(Some(v));
+        }
+    }
+    if text.contains('/') {
+        let parts: Vec<&str> = text.split('/').collect();
+        if parts.len() == 2 {
+            let num_res = parts[0].trim().parse::<f64>();
+            let den_res = parts[1].trim().parse::<f64>();
+            if let (Ok(num), Ok(den)) = (num_res, den_res) {
+                if den == 0.0 {
+                    return Err("Division by zero in exponent.".to_string());
+                }
+                let val = num / den;
+                if val.is_finite() {
+                    if (val - val.round()).abs() < 1e-12 && val.abs() < 1e15 {
+                        return Ok(Some(val.round()));
+                    }
+                    return Ok(Some(val));
+                }
+            }
+        }
+    }
+    Err(format!("Invalid exponent '{}'.", text))
+}
+
+/// Raise base Value to power exp (f64).
+/// Supports integer, float, and negative powers matching Python's _apply_exponent.
+pub fn apply_exponent(base: &Value, exp: f64) -> Result<Value, String> {
+    match base {
+        Value::Number(b) => {
+            let b = *b;
+            if b == 0.0 && exp < 0.0 {
+                return Err("Division by zero.".to_string());
+            }
+            if b < 0.0 {
+                // If exp is an integer
+                if (exp - exp.round()).abs() < 1e-9 {
+                    let exp_i = exp.round() as i64;
+                    let sign = if exp_i % 2 == 0 { 1.0 } else { -1.0 };
+                    let powered = sign * (-b).powf(exp);
+                    let rounded = powered.round();
+                    let final_val = if (powered - rounded).abs() < 1e-12 && rounded.abs() < 1e15 { rounded } else { powered };
+                    return Ok(Value::Number(final_val));
+                }
+                // Check for odd denominator root (e.g. (-8)^(1/3) == -2)
+                let recip = 1.0 / exp;
+                if (recip - recip.round()).abs() < 1e-9 && (recip.round() as i64) % 2 != 0 {
+                    let powered = -((-b).powf(exp));
+                    let rounded = powered.round();
+                    let final_val = if (powered - rounded).abs() < 1e-12 && rounded.abs() < 1e15 { rounded } else { powered };
+                    return Ok(Value::Number(final_val));
+                }
+                return Err("Cannot calculate power: negative base with fractional exponent.".to_string());
+            }
+
+            let res = b.powf(exp);
+            if res.is_infinite() {
+                return Err("Exponent calculation overflow.".to_string());
+            }
+            if res.is_nan() {
+                return Err("Cannot calculate power: invalid math domain.".to_string());
+            }
+            let rounded = res.round();
+            let final_val = if (res - rounded).abs() < 1e-12 && rounded.abs() < 1e15 { rounded } else { res };
+            Ok(Value::Number(final_val))
+        }
+        _ => Err("Cannot apply exponent to structured data.".to_string()),
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -859,19 +946,66 @@ impl Document {
 
         let mut last = 0;
 
-        // 1. Verify join operators and compute each row's individual expression
+        // 1. Pre-validate exponents and join symbols across used rows
         for (idx, &k) in used_indices.iter().enumerate() {
-            if idx > 0 && self.rows[k].join == Join::None {
+            let row = &self.rows[k];
+            let close_states = &row.paren_close_states;
+            let p_count = row.paren_pairs_count;
+
+            // Check for group exponent without active closing parenthesis and validate syntax
+            for (p_idx, exp_box) in row.exponent_2_boxes.iter().enumerate() {
+                let exp_text = exp_box.trim();
+                if !exp_text.is_empty() {
+                    let is_active = close_states.get(p_idx).copied().unwrap_or(false);
+                    if !is_active {
+                        let col_letter = if p_count > 1 {
+                            excel_18col_column_letter(15 + p_count + 2 * p_idx)
+                        } else {
+                            "P".to_string()
+                        };
+                        return Err(format!(
+                            "Row {} has a group exponent (Column {}) without a closing parenthesis ')'.",
+                            k + 1, col_letter
+                        ));
+                    }
+                    if let Err(e) = parse_exponent_value(exp_text) {
+                        return Err(format!("Row {}: {}", k + 1, e));
+                    }
+                }
+            }
+
+            // Check individual row exponent box (Exponent Box 1)
+            let exp1_text = row.exponent_1.trim();
+            if !exp1_text.is_empty() {
+                if let Err(e) = parse_exponent_value(exp1_text) {
+                    return Err(format!("Row {}: {}", k + 1, e));
+                }
+            }
+
+            if idx > 0 && row.join == Join::None {
                 return Err(format!("Row {} needs a join symbol: pick + − × ÷ = above its boxes.", k + 1));
             }
+        }
+
+        // 2. Evaluate each row's individual expression and apply Exponent Box 1
+        for &k in &used_indices {
             self.rows[k].compute();
             if let Some(e) = self.rows[k].error.clone() {
                 return Err(if k == 0 { e } else { format!("Row {}: {}", k + 1, e) });
             }
+            let mut v = self.rows[k].value.clone().ok_or_else(|| format!("Row {} has no answer", k + 1))?;
+            let exp1_text = self.rows[k].exponent_1.trim();
+            if !exp1_text.is_empty() {
+                if let Some(exp1) = parse_exponent_value(exp1_text).map_err(|e| format!("Row {}: {}", k + 1, e))? {
+                    v = apply_exponent(&v, exp1).map_err(|e| format!("Row {}: {}", k + 1, e))?;
+                }
+            }
+            self.rows[k].value = Some(v.clone());
+            self.rows[k].result = v.show();
             last = k;
         }
 
-        // 2. Evaluate nested expressions across rows using a stack-based frame parser
+        // 3. Evaluate nested expressions across rows using a stack-based frame parser
         #[derive(Debug)]
         struct ParenFrame {
             start_row: usize,
@@ -911,15 +1045,22 @@ impl Document {
             // Push this row's evaluated value into innermost scope
             stack.last_mut().unwrap().operands.push(row_val);
 
-            // Closing parentheses on this row close innermost scopes
-            let active_closes: Vec<usize> = self.rows[k]
+            // Closing parentheses on this row paired 1-to-1 with their group exponents
+            let active_closes: Vec<(usize, Option<String>)> = self.rows[k]
                 .paren_close_states
                 .iter()
                 .enumerate()
-                .filter_map(|(p_idx, &is_active)| if is_active { Some(p_idx) } else { None })
+                .filter_map(|(p_idx, &is_active)| {
+                    if is_active {
+                        let exp_str = self.rows[k].exponent_2_boxes.get(p_idx).cloned();
+                        Some((p_idx, exp_str))
+                    } else {
+                        None
+                    }
+                })
                 .collect();
 
-            for _p_idx in active_closes {
+            for (_p_idx, exp_str) in active_closes {
                 if stack.len() <= 1 {
                     return Err(format!(
                         "Row {} has a closing parenthesis ')' without a matching opening parenthesis '('. Please add '(' or remove ')'.",
@@ -927,13 +1068,23 @@ impl Document {
                     ));
                 }
                 let frame = stack.pop().unwrap();
-                let sub_val = if frame.operands.is_empty() {
+                let mut sub_val = if frame.operands.is_empty() {
                     return Err("Invalid mathematical grouping.".to_string());
                 } else if frame.operands.len() == 1 && frame.operators.is_empty() {
                     frame.operands[0].clone()
                 } else {
                     eval_pemdas(&frame.operands, &frame.operators)?
                 };
+
+                // Apply group exponent associated with this specific closing parenthesis
+                if let Some(ref es) = exp_str {
+                    let es_trimmed = es.trim();
+                    if !es_trimmed.is_empty() {
+                        if let Some(exp2) = parse_exponent_value(es_trimmed).map_err(|e| format!("Row {}: {}", k + 1, e))? {
+                            sub_val = apply_exponent(&sub_val, exp2).map_err(|e| format!("Row {}: {}", k + 1, e))?;
+                        }
+                    }
+                }
 
                 stack.last_mut().unwrap().operands.push(sub_val);
             }
@@ -965,12 +1116,6 @@ impl Document {
             return Ok(format!("Row 1 = {}", total.show()));
         }
 
-        for &k in &used_indices {
-            if let Some(v) = &self.rows[k].value {
-                self.rows[k].result = v.show();
-            }
-        }
-
         while self.rows.len() > last + 1 {
             self.rows.pop();
         }
@@ -982,6 +1127,79 @@ impl Document {
         Ok(format!("All {} rows joined = {}  (shown in Row {})", used, total.show(), last + 2))
     }
 
+    /// Format mathematical analysis string matching Python Checkpoint 6C:
+    /// e.g. "Row 1:  (( 2\nRow 2:  + 3 )^2 )^3\n=  15625     (all 2 rows joined, shown in Row 3)"
+    pub fn format_mathematical_analysis(&self) -> String {
+        let mut used_indices: Vec<usize> = Vec::new();
+        for (k, r) in self.rows.iter().enumerate() {
+            if !r.is_blank() && !r.is_result {
+                used_indices.push(k);
+            }
+        }
+        if used_indices.is_empty() {
+            return String::new();
+        }
+        let mut lines = Vec::new();
+        for (idx, &k) in used_indices.iter().enumerate() {
+            let row = &self.rows[k];
+            let cards: String = {
+                let flattened = row.flatten();
+                if flattened.is_empty() {
+                    "□".to_string()
+                } else {
+                    flattened.into_iter().map(|c| if c.text.is_empty() { "□".to_string() } else { c.text }).collect::<Vec<_>>().join(" ")
+                }
+            };
+            let open_count = row.paren_open_states.iter().filter(|&&s| s).count();
+            let exp1_str = row.exponent_1.trim();
+            let base_part = if !exp1_str.is_empty() {
+                if cards.split_whitespace().count() > 1 {
+                    format!("({})^{}", cards, exp1_str)
+                } else {
+                    format!("{}^{}", cards, exp1_str)
+                }
+            } else {
+                cards
+            };
+            let open_prefix = "( ".repeat(open_count);
+
+            let mut close_parts = Vec::new();
+            for (p_idx, &is_active) in row.paren_close_states.iter().enumerate() {
+                if is_active {
+                    let exp2_str = row.exponent_2_boxes.get(p_idx).map(|s| s.trim()).unwrap_or("");
+                    if !exp2_str.is_empty() {
+                        close_parts.push(format!(")^{}", exp2_str));
+                    } else {
+                        close_parts.push(")".to_string());
+                    }
+                }
+            }
+            let close_suffix = if !close_parts.is_empty() {
+                format!(" {}", close_parts.join(" "))
+            } else {
+                String::new()
+            };
+            let row_part = format!("{}{}{}", open_prefix, base_part, close_suffix);
+            if idx == 0 {
+                lines.push(format!("Row 1:  {}", row_part));
+            } else {
+                lines.push(format!("Row {}:  {} {}", k + 1, row.join.symbol(), row_part));
+            }
+        }
+
+        let total_str = self.rows.iter().rev().find(|r| r.is_result).and_then(|r| (!r.result.is_empty()).then(|| r.result.as_str()))
+            .or_else(|| self.rows.first().and_then(|r| (!r.result.is_empty()).then(|| r.result.as_str())))
+            .unwrap_or("□");
+
+        if used_indices.len() > 1 {
+            let last = *used_indices.last().unwrap();
+            lines.push(format!("=  {}     (all {} rows joined, shown in Row {})", total_str, used_indices.len(), last + 2));
+        } else {
+            lines.push(format!("=  {}     (shown in Row 1's answer card, right of the =)", total_str));
+        }
+
+        lines.join("\n")
+    }
     /// A join key under the keypad (like pressing + on a calculator): put the symbol on the target row and carry on in that row, so the next digits are ITS number.
     /// A second join key after the number of an already joined row starts the NEXT row, so  1 + 1 + 1  makes three rows.
     pub fn join_key(&mut self, symbol: &str) -> String {
