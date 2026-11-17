@@ -382,6 +382,134 @@ fn main() -> eframe::Result<()> {
                         app.active_exponent = None;
                         app.doc.clear();
                     }
+                    "7i_stage_a" => {
+                        // Checkpoint 7I Stage A: Initial one-row state
+                        app.active_exponent = None;
+                        app.doc.clear();
+                    }
+                    "7i_stage_b" => {
+                        // Checkpoint 7I Stage B: Single-row result without Total
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["42".to_string()];
+                        let _ = app.doc.equals_all();
+                        app.doc.target_row = 0;
+                    }
+                    "7i_stage_c" => {
+                        // Checkpoint 7I Stage C: Two-row calculation with aligned Total
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        let _ = app.doc.equals_all();
+                        app.doc.target_row = 1;
+                    }
+                    "7i_stage_d" => {
+                        // Checkpoint 7I Stage D: PEMDAS calculation producing 14 (2 + 3 * 4 = 14)
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        app.doc.next_row();
+                        app.doc.rows[2].ensure_number_box();
+                        app.doc.rows[2].join = Join::Mul;
+                        app.doc.rows[2].inputs = vec!["4".to_string()];
+                        let _ = app.doc.equals_all();
+                        app.doc.target_row = 2;
+                    }
+                    "7i_stage_e" => {
+                        // Checkpoint 7I Stage E: Nested parentheses producing 20: ((2 + 3) * 4) = 20
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.add_paren_pair(0);
+                        app.doc.toggle_paren_open(0, 0);
+                        app.doc.toggle_paren_open(0, 1);
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        app.doc.toggle_paren_close(1, 0);
+                        app.doc.next_row();
+                        app.doc.rows[2].ensure_number_box();
+                        app.doc.rows[2].join = Join::Mul;
+                        app.doc.rows[2].inputs = vec!["4".to_string()];
+                        app.doc.toggle_paren_close(2, 0);
+                        let _ = app.doc.equals_all();
+                        app.doc.target_row = 2;
+                    }
+                    "7i_stage_f" => {
+                        // Checkpoint 7I Stage F: Independent nested exponents producing 15625: ((2 + 3)^2)^3
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.add_paren_pair(0);
+                        app.doc.toggle_paren_open(0, 0);
+                        app.doc.toggle_paren_open(0, 1);
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        app.doc.toggle_paren_close(1, 0);
+                        app.doc.toggle_paren_close(1, 1);
+                        if app.doc.rows[1].exponent_2_boxes.len() < 2 {
+                            app.doc.rows[1].exponent_2_boxes.resize(2, String::new());
+                        }
+                        app.doc.rows[1].exponent_2_boxes[0] = "2".to_string();
+                        app.doc.rows[1].exponent_2_boxes[1] = "3".to_string();
+                        let _ = app.doc.equals_all();
+                        app.doc.target_row = 1;
+                    }
+                    "7i_stage_g" => {
+                        // Checkpoint 7I Stage G: Keyboard focus on an exponent without changing Column E
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.rows[0].exponent_1 = "3".to_string();
+                        app.active_exponent = Some(ActiveExponentTarget::Exp1(0));
+                        app.doc.target_row = 0;
+                    }
+                    "7i_stage_h" => {
+                        // Checkpoint 7I Stage H: Editing after evaluation and producing an updated Total (2 + 4 = 6)
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        let _ = app.doc.equals_all();
+                        app.doc.rows[1].inputs = vec!["4".to_string()];
+                        let _ = app.doc.equals_all();
+                        app.doc.target_row = 1;
+                    }
+                    "7i_stage_i" => {
+                        // Checkpoint 7I Stage I: Multiple mathematical rows with correct horizontal alignment (10 + 20 * 5 = 110)
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["10".to_string()];
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["20".to_string()];
+                        app.doc.next_row();
+                        app.doc.rows[2].ensure_number_box();
+                        app.doc.rows[2].join = Join::Mul;
+                        app.doc.rows[2].inputs = vec!["5".to_string()];
+                        let _ = app.doc.equals_all();
+                        app.doc.target_row = 2;
+                    }
+                    "7i_stage_j" => {
+                        // Checkpoint 7I Stage J: Clear restoring one empty Row 1
+                        app.active_exponent = None;
+                        app.doc.clear();
+                    }
                     "3_rows_aligned" => {
                         // Row 1: 10
                         app.doc.rows[0].inputs = vec!["10".to_string()];
