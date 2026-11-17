@@ -112,6 +112,57 @@ fn main() -> eframe::Result<()> {
                         // Scenario E: After Clear: only the original blank Row 1 remains.
                         app.doc.clear();
                     }
+                    "7e_stage_a" | "pemdas_stage_a" => {
+                        // Checkpoint 7E Stage A: Startup: Only Mathematical Row 1.
+                        app.doc.rows.truncate(1);
+                        app.doc.target_row = 0;
+                    }
+                    "7e_stage_b" | "pemdas_stage_b" => {
+                        // Checkpoint 7E Stage B: Enter 2 in E2; create Row 2 with + in C8; enter 3 in E8.
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        app.doc.target_row = 1;
+                    }
+                    "7e_stage_c" | "pemdas_stage_c" => {
+                        // Checkpoint 7E Stage C: Add Mathematical Row 3 with × in Column C; enter 4 in Column E.
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        app.doc.next_row();
+                        app.doc.rows[2].ensure_number_box();
+                        app.doc.rows[2].join = Join::Mul;
+                        app.doc.rows[2].inputs = vec!["4".to_string()];
+                        app.doc.target_row = 2;
+                    }
+                    "7e_stage_d" | "pemdas_stage_d" => {
+                        // Checkpoint 7E Stage D: Press =; Total displays 14 in Column M beneath Row 3.
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        app.doc.next_row();
+                        app.doc.rows[2].ensure_number_box();
+                        app.doc.rows[2].join = Join::Mul;
+                        app.doc.rows[2].inputs = vec!["4".to_string()];
+                        let _ = app.doc.equals_all();
+                        app.doc.target_row = 2;
+                    }
+                    "7e_stage_e" | "pemdas_stage_e" => {
+                        // Checkpoint 7E Stage E: Clear restores only Row 1.
+                        app.doc.clear();
+                    }
                     "3_rows_aligned" => {
                         // Row 1: 10
                         app.doc.rows[0].inputs = vec!["10".to_string()];

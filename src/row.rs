@@ -86,6 +86,63 @@ impl Join {
             Join::Then => unreachable!(),
         })
     }
+
+    /// Precedence for standard PEMDAS mathematical evaluation:
+    /// Multiplication and Division = 2, Addition and Subtraction = 1, Comparisons/Others = 0.
+    pub fn precedence(self) -> i32 {
+        match self {
+            Join::Mul | Join::Div => 2,
+            Join::Add | Join::Sub => 1,
+            _ => 0,
+        }
+    }
+}
+
+/// Precedence-aware PEMDAS evaluation across multiple operands and join operators.
+/// Evaluates Multiplication and Division (precedence 2) before Addition and Subtraction (precedence 1),
+/// evaluating operators of equal precedence strictly from left to right.
+pub fn eval_pemdas(operands: &[Value], operators: &[Join]) -> Result<Value, String> {
+    if operands.is_empty() {
+        return Err("nothing to calculate".into());
+    }
+    if operators.is_empty() {
+        return Ok(operands[0].clone());
+    }
+    if operands.len() != operators.len() + 1 {
+        return Err("mismatched operands and operators".into());
+    }
+
+    let mut val_stack: Vec<Value> = Vec::new();
+    let mut op_stack: Vec<Join> = Vec::new();
+
+    let apply_top = |op_s: &mut Vec<Join>, val_s: &mut Vec<Value>| -> Result<(), String> {
+        let op = op_s.pop().ok_or_else(|| "Operator stack underflow".to_string())?;
+        let r = val_s.pop().ok_or_else(|| "Operand stack underflow".to_string())?;
+        let l = val_s.pop().ok_or_else(|| "Operand stack underflow".to_string())?;
+        let res = op.apply(&l, &r)?;
+        val_s.push(res);
+        Ok(())
+    };
+
+    val_stack.push(operands[0].clone());
+    for i in 0..operators.len() {
+        let next_op = operators[i];
+        while let Some(&top_op) = op_stack.last() {
+            if top_op.precedence() >= next_op.precedence() {
+                apply_top(&mut op_stack, &mut val_stack)?;
+            } else {
+                break;
+            }
+        }
+        op_stack.push(next_op);
+        val_stack.push(operands[i + 1].clone());
+    }
+
+    while !op_stack.is_empty() {
+        apply_top(&mut op_stack, &mut val_stack)?;
+    }
+
+    val_stack.pop().ok_or_else(|| "No result".to_string())
 }
 
 #[derive(Clone, Debug)]
@@ -755,42 +812,55 @@ impl Document {
         if self.rows.is_empty() || self.rows[0].is_blank() {
             return Err("Pick an operator for Row 1 (open Operators), type its numbers, then press =.".into());
         }
-        let mut total: Option<Value> = None;
-        let (mut used, mut last) = (0usize, 0usize);
+        let mut used_indices: Vec<usize> = Vec::new();
         for k in 0..self.rows.len() {
-            if self.rows[k].is_blank() {
-                continue;
+            if !self.rows[k].is_blank() {
+                used_indices.push(k);
+            }
+        }
+
+        if used_indices.is_empty() {
+            return Err("nothing to calculate".into());
+        }
+
+        let mut operands: Vec<Value> = Vec::new();
+        let mut operators: Vec<Join> = Vec::new();
+        let mut last = 0;
+
+        for (idx, &k) in used_indices.iter().enumerate() {
+            if idx > 0 && self.rows[k].join == Join::None {
+                return Err(format!("Row {} needs a join symbol: pick + − × ÷ = above its boxes.", k + 1));
             }
             self.rows[k].compute();
             if let Some(e) = self.rows[k].error.clone() {
                 return Err(if k == 0 { e } else { format!("Row {}: {}", k + 1, e) });
             }
             let v = self.rows[k].value.clone().ok_or_else(|| format!("Row {} has no answer", k + 1))?;
-            total = Some(match total {
-                None => v,
-                Some(t) => {
-                    if self.rows[k].join == Join::None {
-                        return Err(format!("Row {} needs a join symbol: pick + − × ÷ = above its boxes.", k + 1));
-                    }
-                    self.rows[k].join.apply(&t, &v)?
-                }
-            });
-            used += 1;
+            operands.push(v);
+            if idx > 0 {
+                operators.push(self.rows[k].join);
+            }
             last = k;
         }
-        let total = total.ok_or_else(|| "nothing to calculate".to_string())?;
-        if used > 1 {
-            while self.rows.len() > last + 1 {
-                self.rows.pop();
-            }
-            let mut total_row = Row::blank();
-            total_row.is_result = true;
-            total_row.result = total.show();
-            total_row.value = Some(total.clone());
-            self.rows.push(total_row);
-            return Ok(format!("All {} rows joined = {}  (shown in Row {})", used, total.show(), last + 2));
+
+        let total = eval_pemdas(&operands, &operators)?;
+        let used = used_indices.len();
+
+        if used == 1 {
+            self.rows[used_indices[0]].result = total.show();
+            self.rows[used_indices[0]].value = Some(total.clone());
+            return Ok(format!("Row 1 = {}", total.show()));
         }
-        Ok(format!("Row 1 = {}", total.show()))
+
+        while self.rows.len() > last + 1 {
+            self.rows.pop();
+        }
+        let mut total_row = Row::blank();
+        total_row.is_result = true;
+        total_row.result = total.show();
+        total_row.value = Some(total.clone());
+        self.rows.push(total_row);
+        Ok(format!("All {} rows joined = {}  (shown in Row {})", used, total.show(), last + 2))
     }
 
     /// A join key under the keypad (like pressing + on a calculator): put the symbol on the target row and carry on in that row, so the next digits are ITS number.

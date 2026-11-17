@@ -58,7 +58,7 @@ const CONTEXT_W_MIN: f32 = 72.0;
 
 pub struct CalculatorApp {
     pub doc: Document,
-    status: String,
+    pub status: String,
     show_ops: bool,
     op_filter: String,
     selected_category: String,
