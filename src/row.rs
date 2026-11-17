@@ -109,7 +109,7 @@ pub fn eval_pemdas(operands: &[Value], operators: &[Join]) -> Result<Value, Stri
         return Ok(operands[0].clone());
     }
     if operands.len() != operators.len() + 1 {
-        return Err("mismatched operands and operators".into());
+        return Err("Invalid mathematical grouping.".into());
     }
 
     let mut val_stack: Vec<Value> = Vec::new();
@@ -223,16 +223,18 @@ impl Row {
 
     /// Toggle active/inactive state of opening parenthesis '(' at pair index p.
     pub fn toggle_paren_open(&mut self, p: usize) {
-        if p < self.paren_open_states.len() {
-            self.paren_open_states[p] = !self.paren_open_states[p];
+        while self.paren_open_states.len() <= p {
+            self.paren_open_states.push(false);
         }
+        self.paren_open_states[p] = !self.paren_open_states[p];
     }
 
     /// Toggle active/inactive state of closing parenthesis ')' at pair index p.
     pub fn toggle_paren_close(&mut self, p: usize) {
-        if p < self.paren_close_states.len() {
-            self.paren_close_states[p] = !self.paren_close_states[p];
+        while self.paren_close_states.len() <= p {
+            self.paren_close_states.push(false);
         }
+        self.paren_close_states[p] = !self.paren_close_states[p];
     }
 
     /// Add another mathematical description box (orange + in Column G).
@@ -573,6 +575,33 @@ impl Document {
         *self = Self::new();
     }
 
+    /// Toggle active/inactive state of opening parenthesis '(' at pair index p on row r,
+    /// and automatically synchronize closing parentheses capacity across subsequent rows.
+    pub fn toggle_paren_open(&mut self, r: usize, p: usize) {
+        if r < self.rows.len() {
+            self.rows[r].toggle_paren_open(p);
+            self.sync_closing_parentheses_capacity();
+        }
+    }
+
+    /// Toggle active/inactive state of closing parenthesis ')' at pair index p on row r,
+    /// and automatically synchronize closing parentheses capacity across subsequent rows.
+    pub fn toggle_paren_close(&mut self, r: usize, p: usize) {
+        if r < self.rows.len() {
+            self.rows[r].toggle_paren_close(p);
+            self.sync_closing_parentheses_capacity();
+        }
+    }
+
+    /// Add another pair of opening and closing parentheses to row r,
+    /// and automatically synchronize closing parentheses capacity across subsequent rows.
+    pub fn add_paren_pair(&mut self, r: usize) {
+        if r < self.rows.len() {
+            self.rows[r].add_paren_pair();
+            self.sync_closing_parentheses_capacity();
+        }
+    }
+
     pub fn ensure_target(&mut self) {
         if self.rows.is_empty() {
             self.rows.push(Row::blank());
@@ -587,6 +616,7 @@ impl Document {
         if self.target_path.is_empty() {
             self.target_path = vec![0];
         }
+        self.sync_closing_parentheses_capacity();
     }
 
     /// The selected box's operator input (operator, input number), if the target is a box.
@@ -792,6 +822,7 @@ impl Document {
         if self.rows[self.target_row].is_result {
             self.rows[self.target_row] = Row::blank(); // carry on from the answer row
         }
+        self.sync_closing_parentheses_capacity();
     }
 
     /// `=`: calculate every row that has math, join them with the join signs (Row 2 joins to Row 1, and so on), show each row's own answer in its own answer card
@@ -823,10 +854,12 @@ impl Document {
             return Err("nothing to calculate".into());
         }
 
-        let mut operands: Vec<Value> = Vec::new();
-        let mut operators: Vec<Join> = Vec::new();
+        // Synchronize closing parentheses capacity across rows first
+        self.sync_closing_parentheses_capacity();
+
         let mut last = 0;
 
+        // 1. Verify join operators and compute each row's individual expression
         for (idx, &k) in used_indices.iter().enumerate() {
             if idx > 0 && self.rows[k].join == Join::None {
                 return Err(format!("Row {} needs a join symbol: pick + − × ÷ = above its boxes.", k + 1));
@@ -835,21 +868,107 @@ impl Document {
             if let Some(e) = self.rows[k].error.clone() {
                 return Err(if k == 0 { e } else { format!("Row {}: {}", k + 1, e) });
             }
-            let v = self.rows[k].value.clone().ok_or_else(|| format!("Row {} has no answer", k + 1))?;
-            operands.push(v);
-            if idx > 0 {
-                operators.push(self.rows[k].join);
-            }
             last = k;
         }
 
-        let total = eval_pemdas(&operands, &operators)?;
+        // 2. Evaluate nested expressions across rows using a stack-based frame parser
+        #[derive(Debug)]
+        struct ParenFrame {
+            start_row: usize,
+            #[allow(dead_code)]
+            depth: usize,
+            operands: Vec<Value>,
+            operators: Vec<Join>,
+        }
+
+        let mut stack = vec![ParenFrame {
+            start_row: used_indices[0],
+            depth: 0,
+            operands: Vec::new(),
+            operators: Vec::new(),
+        }];
+
+        for (idx, &k) in used_indices.iter().enumerate() {
+            let row_val = self.rows[k].value.clone().ok_or_else(|| format!("Row {} has no answer", k + 1))?;
+            let open_count = self.rows[k].paren_open_states.iter().filter(|&&s| s).count();
+
+            // Leading join symbol between rows
+            if idx > 0 {
+                let join_sym = self.rows[k].join;
+                stack.last_mut().unwrap().operators.push(join_sym);
+            }
+
+            // Opening parentheses on this row open nested scopes
+            for _ in 0..open_count {
+                stack.push(ParenFrame {
+                    start_row: k,
+                    depth: stack.len(),
+                    operands: Vec::new(),
+                    operators: Vec::new(),
+                });
+            }
+
+            // Push this row's evaluated value into innermost scope
+            stack.last_mut().unwrap().operands.push(row_val);
+
+            // Closing parentheses on this row close innermost scopes
+            let active_closes: Vec<usize> = self.rows[k]
+                .paren_close_states
+                .iter()
+                .enumerate()
+                .filter_map(|(p_idx, &is_active)| if is_active { Some(p_idx) } else { None })
+                .collect();
+
+            for _p_idx in active_closes {
+                if stack.len() <= 1 {
+                    return Err(format!(
+                        "Row {} has a closing parenthesis ')' without a matching opening parenthesis '('. Please add '(' or remove ')'.",
+                        k + 1
+                    ));
+                }
+                let frame = stack.pop().unwrap();
+                let sub_val = if frame.operands.is_empty() {
+                    return Err("Invalid mathematical grouping.".to_string());
+                } else if frame.operands.len() == 1 && frame.operators.is_empty() {
+                    frame.operands[0].clone()
+                } else {
+                    eval_pemdas(&frame.operands, &frame.operators)?
+                };
+
+                stack.last_mut().unwrap().operands.push(sub_val);
+            }
+        }
+
+        // Check for unclosed opening parentheses
+        if stack.len() > 1 {
+            let start_r = stack.last().unwrap().start_row;
+            return Err(format!(
+                "Row {} has an opening parenthesis '(' without a matching closing parenthesis ')'. Please close it with ')' or remove '('.",
+                start_r + 1
+            ));
+        }
+
+        let top_frame = stack.pop().unwrap();
+        let total = if top_frame.operands.is_empty() {
+            return Err("nothing to calculate".into());
+        } else if top_frame.operands.len() == 1 && top_frame.operators.is_empty() {
+            top_frame.operands[0].clone()
+        } else {
+            eval_pemdas(&top_frame.operands, &top_frame.operators)?
+        };
+
         let used = used_indices.len();
 
         if used == 1 {
             self.rows[used_indices[0]].result = total.show();
             self.rows[used_indices[0]].value = Some(total.clone());
             return Ok(format!("Row 1 = {}", total.show()));
+        }
+
+        for &k in &used_indices {
+            if let Some(v) = &self.rows[k].value {
+                self.rows[k].result = v.show();
+            }
         }
 
         while self.rows.len() > last + 1 {
@@ -889,8 +1008,10 @@ impl Document {
         self.target_path = vec![0];
         if self.rows[i].is_blank() {
             self.rows[i].ensure_number_box();
+            self.sync_closing_parentheses_capacity();
             format!("Row {} is joined to the rows above with  {} .  Type its number, then press =.", i + 1, symbol)
         } else {
+            self.sync_closing_parentheses_capacity();
             format!("Row {} is joined to the rows above with  {} .  Press = to calculate.", i + 1, symbol)
         }
     }

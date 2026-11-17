@@ -163,6 +163,76 @@ fn main() -> eframe::Result<()> {
                         // Checkpoint 7E Stage E: Clear restores only Row 1.
                         app.doc.clear();
                     }
+                    "7f_stage_a" => {
+                        // Checkpoint 7F Stage A: Row 1 with two active opening parentheses
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.add_paren_pair(0);
+                        app.doc.toggle_paren_open(0, 0);
+                        app.doc.toggle_paren_open(0, 1);
+                        app.doc.target_row = 0;
+                    }
+                    "7f_stage_b" => {
+                        // Checkpoint 7F Stage B: Row 2 automatically providing two available closing parentheses
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.add_paren_pair(0);
+                        app.doc.toggle_paren_open(0, 0);
+                        app.doc.toggle_paren_open(0, 1);
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        app.doc.target_row = 1;
+                    }
+                    "7f_stage_c" => {
+                        // Checkpoint 7F Stage C: A nested expression with closing parentheses distributed across multiple rows
+                        // ((2 + 3) * 4) = 20
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.add_paren_pair(0);
+                        app.doc.toggle_paren_open(0, 0);
+                        app.doc.toggle_paren_open(0, 1);
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        app.doc.toggle_paren_close(1, 0);
+                        app.doc.next_row();
+                        app.doc.rows[2].ensure_number_box();
+                        app.doc.rows[2].join = Join::Mul;
+                        app.doc.rows[2].inputs = vec!["4".to_string()];
+                        app.doc.toggle_paren_close(2, 0);
+                        app.doc.target_row = 2;
+                    }
+                    "7f_stage_d" => {
+                        // Checkpoint 7F Stage D: Total displaying the correct result (20)
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.add_paren_pair(0);
+                        app.doc.toggle_paren_open(0, 0);
+                        app.doc.toggle_paren_open(0, 1);
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        app.doc.toggle_paren_close(1, 0);
+                        app.doc.next_row();
+                        app.doc.rows[2].ensure_number_box();
+                        app.doc.rows[2].join = Join::Mul;
+                        app.doc.rows[2].inputs = vec!["4".to_string()];
+                        app.doc.toggle_paren_close(2, 0);
+                        let _ = app.doc.equals_all();
+                        app.doc.target_row = 2;
+                    }
+                    "7f_stage_e" => {
+                        // Checkpoint 7F Stage E: Clear restoring only Row 1
+                        app.doc.clear();
+                    }
                     "3_rows_aligned" => {
                         // Row 1: 10
                         app.doc.rows[0].inputs = vec!["10".to_string()];
