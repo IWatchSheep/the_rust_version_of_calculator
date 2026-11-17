@@ -897,6 +897,18 @@ impl Document {
     }
 
     /// Next Row: from Row 1 to Row 2, and so on.  (The lines of one operator's math are not rows: only this button and the join signs make rows.)
+    /// Remove any trailing Total / result row (e.g. when an expression is edited).
+    pub fn invalidate_total(&mut self) {
+        while self.rows.last().map_or(false, |r| r.is_result) {
+            self.rows.pop();
+        }
+    }
+
+    /// Returns a reference to the active Total row, if present.
+    pub fn total_row(&self) -> Option<&Row> {
+        self.rows.iter().rev().find(|r| r.is_result)
+    }
+
     pub fn next_row(&mut self) {
         while self.rows.last().map_or(false, |r| r.is_result) {
             self.rows.pop();
@@ -1235,6 +1247,7 @@ impl Document {
     }
 
     pub fn append_digit(&mut self, ch: char) {
+        self.invalidate_total();
         self.ensure_target();
         self.rows[self.target_row].ensure_number_box();
         let path = self.target_path.clone();
@@ -1247,6 +1260,7 @@ impl Document {
     }
 
     pub fn backspace(&mut self) {
+        self.invalidate_total();
         self.ensure_target();
         let path = self.target_path.clone();
         let row = &mut self.rows[self.target_row];

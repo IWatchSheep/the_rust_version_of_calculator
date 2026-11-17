@@ -258,20 +258,23 @@ impl eframe::App for CalculatorApp {
                             egui::Key::Num8 => self.on_key("8"),
                             egui::Key::Num9 => self.on_key("9"),
                             egui::Key::Period => self.on_key("."),
-                            egui::Key::Backspace => {
+                            egui::Key::Plus => self.on_key("+"),
+                            egui::Key::Minus => {
                                 if self.active_exponent.is_some() {
-                                    self.on_key("Backspace");
+                                    self.on_key("±");
                                 } else {
-                                    self.doc.backspace();
+                                    self.on_key("-");
                                 }
                             }
+                            egui::Key::Slash => self.on_key("/"),
+                            egui::Key::Backspace => self.on_key("Backspace"),
                             egui::Key::Escape => {
                                 self.active_exponent = None;
-                                self.doc.clear();
-                                self.status = "Cleared. Click a square box and type a number, or open Operators.".into();
+                                self.status = "Focus cleared.".into();
                             }
-                            egui::Key::Enter => self.equals(),
+                            egui::Key::Enter | egui::Key::Equals => self.equals(),
                             egui::Key::ArrowDown => {
+                                self.active_exponent = None;
                                 let math_rows_count = self.doc.rows.iter().filter(|r| !r.is_result).count();
                                 if self.doc.target_row + 1 < math_rows_count {
                                     self.doc.target_row += 1;
@@ -280,6 +283,7 @@ impl eframe::App for CalculatorApp {
                                 }
                             }
                             egui::Key::ArrowUp => {
+                                self.active_exponent = None;
                                 if self.doc.target_row > 0 {
                                     self.doc.target_row -= 1;
                                     self.doc.target_path = vec![0];
@@ -1582,11 +1586,7 @@ impl CalculatorApp {
                     if ui.add_sized(btn_sz, Button::new("0").fill(Color32::from_rgb(0xe8, 0xe8, 0xe8))).clicked() { self.on_key("0"); }
                     if ui.add_sized(btn_sz, Button::new(".").fill(Color32::from_rgb(0xe8, 0xe8, 0xe8))).clicked() { self.on_key("."); }
                     if ui.add_sized(btn_sz, Button::new("Backspace").fill(Color32::from_rgb(0xe8, 0xe8, 0xe8))).clicked() {
-                if self.active_exponent.is_some() {
-                    self.on_key("Backspace");
-                } else {
-                    self.doc.backspace();
-                }
+                self.on_key("Backspace");
             }
                 });
             });
@@ -1743,6 +1743,7 @@ impl CalculatorApp {
             match target {
                 ActiveExponentTarget::Exp1(r) => {
                     if r < self.doc.rows.len() {
+                        self.doc.invalidate_total();
                         let s = &mut self.doc.rows[r].exponent_1;
                         match key {
                             "⌫" | "Backspace" => { s.pop(); }
@@ -1775,6 +1776,7 @@ impl CalculatorApp {
                 }
                 ActiveExponentTarget::Exp2(r, p) => {
                     if r < self.doc.rows.len() && p < self.doc.rows[r].exponent_2_boxes.len() {
+                        self.doc.invalidate_total();
                         let s = &mut self.doc.rows[r].exponent_2_boxes[p];
                         match key {
                             "⌫" | "Backspace" => { s.pop(); }
@@ -1808,6 +1810,7 @@ impl CalculatorApp {
             }
         }
         match key {
+            "⌫" | "Backspace" => self.doc.backspace(),
             "±" => {
                 self.doc.ensure_target();
                 let path = self.doc.target_path.clone();

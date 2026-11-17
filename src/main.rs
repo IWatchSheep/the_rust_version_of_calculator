@@ -5,7 +5,7 @@
 // descriptive columns console, and keypad.
 
 use eframe::egui;
-use rust_calculator::app::CalculatorApp;
+use rust_calculator::app::{ActiveExponentTarget, CalculatorApp};
 use rust_calculator::row::{Join, Row};
 
 fn add_symbol_font(ctx: &egui::Context) {
@@ -302,6 +302,84 @@ fn main() -> eframe::Result<()> {
                     }
                     "7g_stage_e" => {
                         // Checkpoint 7G Stage E: Clear restoring only Row 1
+                        app.doc.clear();
+                    }
+                    "7h_stage_a" => {
+                        // Checkpoint 7H Stage A: Single Row 1 evaluation without a Total row
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["42".to_string()];
+                        let _ = app.doc.equals_all();
+                        app.doc.target_row = 0;
+                    }
+                    "7h_stage_b" => {
+                        // Checkpoint 7H Stage B: Two mathematical rows with a correctly aligned Total row
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        let _ = app.doc.equals_all();
+                        app.doc.target_row = 1;
+                    }
+                    "7h_stage_c" => {
+                        // Checkpoint 7H Stage C: Keyboard input entering a mathematical value in Column E
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["123".to_string()];
+                        app.active_exponent = None;
+                        app.doc.target_row = 0;
+                    }
+                    "7h_stage_d" => {
+                        // Checkpoint 7H Stage D: Keyboard or keypad input entering an exponent without changing Column E
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.rows[0].exponent_1 = "3".to_string();
+                        app.active_exponent = Some(ActiveExponentTarget::Exp1(0));
+                        app.doc.target_row = 0;
+                    }
+                    "7h_stage_e" => {
+                        // Checkpoint 7H Stage E: Editing a value and reevaluating the existing Total without duplication
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        let _ = app.doc.equals_all();
+                        app.doc.rows[1].inputs = vec!["4".to_string()];
+                        let _ = app.doc.equals_all();
+                        app.doc.target_row = 1;
+                    }
+                    "7h_stage_f" => {
+                        // Checkpoint 7H Stage F: Nested-group exponent evaluation producing 15625
+                        app.doc.rows.truncate(1);
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["2".to_string()];
+                        app.doc.add_paren_pair(0);
+                        app.doc.toggle_paren_open(0, 0);
+                        app.doc.toggle_paren_open(0, 1);
+                        app.doc.next_row();
+                        app.doc.rows[1].ensure_number_box();
+                        app.doc.rows[1].join = Join::Add;
+                        app.doc.rows[1].inputs = vec!["3".to_string()];
+                        app.doc.toggle_paren_close(1, 0);
+                        app.doc.toggle_paren_close(1, 1);
+                        if app.doc.rows[1].exponent_2_boxes.len() < 2 {
+                            app.doc.rows[1].exponent_2_boxes.resize(2, String::new());
+                        }
+                        app.doc.rows[1].exponent_2_boxes[0] = "2".to_string();
+                        app.doc.rows[1].exponent_2_boxes[1] = "3".to_string();
+                        let _ = app.doc.equals_all();
+                        app.doc.target_row = 1;
+                    }
+                    "7h_stage_g" => {
+                        // Checkpoint 7H Stage G: Clear returning the application to one empty Row 1
+                        app.active_exponent = None;
                         app.doc.clear();
                     }
                     "3_rows_aligned" => {
