@@ -264,6 +264,8 @@ fn test_row1_expanding_descriptions() {
 #[test]
 fn test_independent_row_architecture() {
     let mut doc = Document::new();
+    assert_eq!(doc.rows.len(), 1);
+    doc.next_row();
     assert_eq!(doc.rows.len(), 2);
 
     // Configure Row 1 with distinct 18-column values

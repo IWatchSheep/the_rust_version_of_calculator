@@ -21,7 +21,7 @@ use rust_calculator::row::{Document, Join};
 #[test]
 fn test_req1_and_req2_creating_rows_sequence() {
     let mut doc = Document::new();
-    assert_eq!(doc.rows.len(), 2, "Document initializes with baseline rows");
+    assert_eq!(doc.rows.len(), 1, "Document initializes with Row 1 only");
 
     // Start on Row 1
     doc.target_row = 0;
@@ -31,7 +31,7 @@ fn test_req1_and_req2_creating_rows_sequence() {
     // 1. Create/advance to Row 2 from Row 1
     doc.next_row();
     assert_eq!(doc.target_row, 1, "target_row advanced to Row 2");
-    assert_eq!(doc.rows.len(), 2);
+    assert_eq!(doc.rows.len(), 2, "Row 2 created dynamically");
     assert_eq!(doc.rows[1].paren_pairs_count, 1);
 
     // 2. Create Row 3 from Row 2
@@ -44,7 +44,9 @@ fn test_req1_and_req2_creating_rows_sequence() {
 
 #[test]
 fn test_req3_correct_18col_structure_for_every_row() {
-    let doc = Document::new();
+    let mut doc = Document::new();
+    doc.next_row(); // create Row 2
+    doc.next_row(); // create Row 3
     for (i, row) in doc.rows.iter().enumerate() {
         assert_eq!(row.paren_pairs_count, 1, "Row {} starts with 1 paren pair", i + 1);
         assert_eq!(row.paren_open_states, vec![false]);
@@ -75,6 +77,7 @@ fn test_req3_correct_18col_structure_for_every_row() {
 fn test_req4_independent_mathematical_inputs() {
     let mut doc = Document::new();
     doc.rows[0].inputs = vec!["100".to_string()];
+    doc.next_row(); // creates Row 2
     doc.rows[1].inputs = vec!["200".to_string()];
 
     // Advance to Row 2, then Next Row creates Row 3
@@ -101,6 +104,7 @@ fn test_req5_independent_descriptions() {
     doc.rows[0].add_math_description();
     doc.rows[0].math_descriptions[1] = "in m/s".to_string();
 
+    doc.next_row(); // creates Row 2
     doc.rows[1].math_descriptions[0] = "Acceleration".to_string();
 
     assert_eq!(doc.rows[0].math_descriptions.len(), 2);
@@ -117,6 +121,9 @@ fn test_req6_independent_parentheses_selections() {
     doc.rows[0].toggle_paren_open(0);
     assert_eq!(doc.rows[0].paren_open_states, vec![true]);
     assert_eq!(doc.rows[0].paren_close_states, vec![false]);
+
+    // Create Row 2
+    doc.next_row();
 
     // Row 2 parentheses remain unaffected
     assert_eq!(doc.rows[1].paren_open_states, vec![false]);
@@ -136,6 +143,7 @@ fn test_req7_independent_exponent_values() {
     doc.rows[0].exponent_1 = "2".to_string();
     doc.rows[0].exponent_2_boxes[0] = "3".to_string();
 
+    doc.next_row(); // creates Row 2
     doc.rows[1].exponent_1 = "4".to_string();
     doc.rows[1].exponent_2_boxes[0] = "5".to_string();
 
@@ -171,6 +179,9 @@ fn test_req9_expanding_only_one_row() {
     assert_eq!(doc.rows[0].paren_close_states.len(), 3);
     assert_eq!(doc.rows[0].exponent_2_boxes.len(), 3);
 
+    // Create Row 2
+    doc.next_row();
+
     // Row 2 remains at baseline 1 pair
     assert_eq!(doc.rows[1].paren_pairs_count, 1);
     assert_eq!(doc.rows[1].paren_open_states.len(), 1);
@@ -193,6 +204,7 @@ fn test_req10_preserving_existing_mathematical_operations() {
 
     // Row 2: multiplication 5 * 4 = 20
     let op_mul = ops::get("math/arithmetic/multiplication").unwrap();
+    doc.next_row(); // creates Row 2
     doc.target_row = 1;
     doc.place_operator(op_mul);
     doc.rows[1].inputs[0] = "5".to_string();
@@ -215,21 +227,21 @@ fn test_req11_clearing_back_to_initial_state() {
     doc.rows[0].inputs = vec!["10".to_string()];
     doc.rows[0].add_paren_pair();
     doc.rows[0].add_math_description();
+
+    doc.next_row(); // creates Row 2
     doc.rows[1].inputs = vec!["20".to_string()];
     doc.rows[1].join = Join::Add;
-    doc.target_row = 1;
-    doc.next_row();
+
+    doc.next_row(); // creates Row 3
     assert_eq!(doc.rows.len(), 3);
 
     // Clear all
     doc.clear();
     assert_eq!(doc.target_row, 0);
-    assert_eq!(doc.rows.len(), 2, "Default reset state is clean 2 rows");
+    assert_eq!(doc.rows.len(), 1, "Default reset state is clean 1 row (Row 1 only)");
     assert!(doc.rows[0].is_blank());
     assert_eq!(doc.rows[0].paren_pairs_count, 1);
     assert_eq!(doc.rows[0].math_descriptions.len(), 1);
-    assert!(doc.rows[1].is_blank());
-    assert_eq!(doc.rows[1].paren_pairs_count, 1);
 }
 
 #[test]
@@ -239,6 +251,9 @@ fn test_parentheses_propagation_readiness() {
     doc.rows[0].add_paren_pair();
     doc.rows[0].toggle_paren_open(0);
     doc.rows[0].toggle_paren_open(1);
+
+    // Create Row 2
+    doc.next_row();
 
     // Sync capacity: Row 2 automatically receives at least 2 closing controls
     doc.sync_closing_parentheses_capacity();

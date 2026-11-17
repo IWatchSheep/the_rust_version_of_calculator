@@ -505,7 +505,7 @@ pub struct Document {
 impl Document {
     pub fn new() -> Self {
         Self {
-            rows: vec![Row::blank(), Row::blank()],
+            rows: vec![Row::blank()],
             target_row: 0,
             target_path: vec![0],
             template: None,
@@ -724,6 +724,9 @@ impl Document {
 
     /// Next Row: from Row 1 to Row 2, and so on.  (The lines of one operator's math are not rows: only this button and the join signs make rows.)
     pub fn next_row(&mut self) {
+        while self.rows.last().map_or(false, |r| r.is_result) {
+            self.rows.pop();
+        }
         if self.target_row + 1 >= self.rows.len() {
             self.rows.push(Row::blank());
         }
@@ -741,7 +744,7 @@ impl Document {
             return self.equals_template(t);
         }
         // a previous answer row is dropped; the rows go back to being ready for more math
-        while self.rows.len() > 2 && self.rows.last().map_or(false, |r| r.is_result) {
+        while self.rows.last().map_or(false, |r| r.is_result) {
             self.rows.pop();
         }
         for r in self.rows.iter_mut() {
@@ -749,7 +752,7 @@ impl Document {
                 *r = Row::blank();
             }
         }
-        if self.rows[0].is_blank() {
+        if self.rows.is_empty() || self.rows[0].is_blank() {
             return Err("Pick an operator for Row 1 (open Operators), type its numbers, then press =.".into());
         }
         let mut total: Option<Value> = None;
@@ -777,14 +780,14 @@ impl Document {
         }
         let total = total.ok_or_else(|| "nothing to calculate".to_string())?;
         if used > 1 {
-            if last + 1 >= self.rows.len() {
-                self.rows.push(Row::blank());
+            while self.rows.len() > last + 1 {
+                self.rows.pop();
             }
-            let r = &mut self.rows[last + 1];
-            *r = Row::blank();
-            r.is_result = true;
-            r.result = total.show();
-            r.value = Some(total.clone());
+            let mut total_row = Row::blank();
+            total_row.is_result = true;
+            total_row.result = total.show();
+            total_row.value = Some(total.clone());
+            self.rows.push(total_row);
             return Ok(format!("All {} rows joined = {}  (shown in Row {})", used, total.show(), last + 2));
         }
         Ok(format!("Row 1 = {}", total.show()))
@@ -794,6 +797,9 @@ impl Document {
     /// A second join key after the number of an already joined row starts the NEXT row, so  1 + 1 + 1  makes three rows.
     pub fn join_key(&mut self, symbol: &str) -> String {
         self.ensure_target();
+        while self.rows.last().map_or(false, |r| r.is_result) {
+            self.rows.pop();
+        }
         let mut i = self.target_row.max(1);
         if i < self.rows.len() && self.rows[i].join != Join::None && !self.rows[i].is_result && !self.rows[i].is_blank() {
             i += 1;

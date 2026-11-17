@@ -6,7 +6,7 @@
 
 use eframe::egui;
 use rust_calculator::app::CalculatorApp;
-use rust_calculator::row::Join;
+use rust_calculator::row::{Join, Row};
 
 fn add_symbol_font(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
@@ -71,30 +71,53 @@ fn main() -> eframe::Result<()> {
             let mut app = if let Some(sc) = scenario {
                 let mut app = CalculatorApp::default();
                 match sc.as_str() {
-                    "initial_row1" => {
+                    "initial_row1" | "startup_row1" | "scenario_a" => {
+                        // Scenario A: Startup - Mathematical Row 1 only. No Row 2. No Total. No eight-arrows.
                         app.doc.rows.truncate(1);
                         app.doc.target_row = 0;
                     }
-                    "rows_1_2" => {
+                    "scenario_b" => {
+                        // Scenario B: After entering 1 in E2: Row 1 remains aligned, no unwanted directional controls.
+                        app.doc.rows.truncate(1);
+                        app.doc.target_row = 0;
                         app.doc.rows[0].ensure_number_box();
                         app.doc.rows[0].inputs = vec!["1".to_string()];
+                    }
+                    "rows_1_2" | "state_b_add_row2" | "scenario_c" => {
+                        // Scenario C: After adding Row 2 with + in C8 and entering 1 in E8: Rows 1 & 2 aligned, no Total, no arrows.
+                        app.doc.rows[0].ensure_number_box();
+                        app.doc.rows[0].inputs = vec!["1".to_string()];
+                        if app.doc.rows.len() < 2 {
+                            app.doc.rows.push(Row::blank());
+                        }
                         app.doc.rows[1].ensure_number_box();
                         app.doc.rows[1].join = Join::Add;
                         app.doc.rows[1].inputs = vec!["1".to_string()];
                         app.doc.target_row = 1;
                     }
-                    "rows_1_2_total" => {
+                    "rows_1_2_total" | "state_c_equals_total" | "scenario_d" => {
+                        // Scenario D: After pressing =: Row 1 displays 1, Row 2 displays 1, Total displays 2 in M13. No arrows.
                         app.doc.rows[0].ensure_number_box();
                         app.doc.rows[0].inputs = vec!["1".to_string()];
+                        if app.doc.rows.len() < 2 {
+                            app.doc.rows.push(Row::blank());
+                        }
                         app.doc.rows[1].ensure_number_box();
                         app.doc.rows[1].join = Join::Add;
                         app.doc.rows[1].inputs = vec!["1".to_string()];
                         let _ = app.doc.equals_all();
                         app.doc.target_row = 1;
                     }
+                    "scenario_e" => {
+                        // Scenario E: After Clear: only the original blank Row 1 remains.
+                        app.doc.clear();
+                    }
                     "3_rows_aligned" => {
                         // Row 1: 10
                         app.doc.rows[0].inputs = vec!["10".to_string()];
+                        if app.doc.rows.len() < 2 {
+                            app.doc.rows.push(Row::blank());
+                        }
                         // Row 2: Join +, input 20
                         app.doc.rows[1].join = Join::Add;
                         app.doc.rows[1].inputs = vec!["20".to_string()];
@@ -115,6 +138,9 @@ fn main() -> eframe::Result<()> {
                         app.doc.rows[0].exponent_1 = "3".to_string();
                         app.doc.rows[0].exponent_2_boxes[0] = "2".to_string();
                         // Row 2: Join +, baseline unexpanded (1 pair)
+                        if app.doc.rows.len() < 2 {
+                            app.doc.rows.push(Row::blank());
+                        }
                         app.doc.rows[1].join = Join::Add;
                         app.doc.rows[1].inputs = vec!["4".to_string()];
                     }
@@ -128,6 +154,9 @@ fn main() -> eframe::Result<()> {
                         app.doc.rows[0].add_result_description();
                         app.doc.rows[0].result_descriptions[1] = "sq meters".to_string();
                         // Row 2: Join +, single description
+                        if app.doc.rows.len() < 2 {
+                            app.doc.rows.push(Row::blank());
+                        }
                         app.doc.rows[1].join = Join::Add;
                         app.doc.rows[1].inputs = vec!["75".to_string()];
                         app.doc.rows[1].math_descriptions[0] = "Height".to_string();

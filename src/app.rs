@@ -154,7 +154,7 @@ impl Default for CalculatorApp {
             custom_word: String::new(),
             rows_scroll_to: None,
             rows_follow_target: 0,
-            rows_follow_count: 2,
+            rows_follow_count: 1,
             screenshot_path: None,
             screenshot_frame_count: 0,
         }
@@ -251,7 +251,26 @@ impl eframe::App for CalculatorApp {
                             egui::Key::Num9 => self.on_key("9"),
                             egui::Key::Period => self.on_key("."),
                             egui::Key::Backspace => self.doc.backspace(),
+                            egui::Key::Escape => {
+                                self.doc.clear();
+                                self.status = "Cleared. Click a square box and type a number, or open Operators.".into();
+                            }
                             egui::Key::Enter => self.equals(),
+                            egui::Key::ArrowDown => {
+                                let math_rows_count = self.doc.rows.iter().filter(|r| !r.is_result).count();
+                                if self.doc.target_row + 1 < math_rows_count {
+                                    self.doc.target_row += 1;
+                                    self.doc.target_path = vec![0];
+                                    self.status = format!("Selected Row {}.", self.doc.target_row + 1);
+                                }
+                            }
+                            egui::Key::ArrowUp => {
+                                if self.doc.target_row > 0 {
+                                    self.doc.target_row -= 1;
+                                    self.doc.target_path = vec![0];
+                                    self.status = format!("Selected Row {}.", self.doc.target_row + 1);
+                                }
+                            }
                             _ => {}
                         }
                     }
@@ -988,7 +1007,10 @@ impl CalculatorApp {
 
                 // 5. Col E (5): Main mathematical input (width 114)
                 let target_path = self.doc.target_path.clone();
-                if self.doc.rows[i].flatten().is_empty() {
+                let cards = self.doc.rows[i].flatten();
+                let is_single_number_box = cards.is_empty()
+                    || (cards.len() == 1 && cards[0].kind == crate::layout::CardKind::Box);
+                if is_single_number_box {
                     fixed_col(ui, col_e_w, row_h, egui::Layout::top_down(egui::Align::Center), |ui| {
                         ui.add_space(subrow_top + 4.0);
                         if self.doc.rows[i].inputs.is_empty() {
@@ -997,9 +1019,9 @@ impl CalculatorApp {
                         let num_text = self.doc.rows[i].inputs.first().map(|s| s.as_str()).unwrap_or("");
                         let display_num = if num_text.is_empty() { "□" } else { num_text };
                         let (bg, stroke) = if is_target {
-                            (Color32::from_rgb(0xde, 0xee, 0xfc), egui::Stroke::new(2.0, Color32::from_rgb(0x1e, 0x88, 0xe5)))
+                            (TARGET_BLUE, egui::Stroke::new(2.0, BLUE))
                         } else {
-                            (Color32::WHITE, egui::Stroke::new(1.0, Color32::from_rgb(0x88, 0x88, 0x88)))
+                            (PALE_BLUE, egui::Stroke::new(1.0, BLUE))
                         };
                         let btn = Button::new(RichText::new(display_num).size(14.0).strong().color(Color32::BLACK))
                             .fill(bg)
@@ -1009,6 +1031,7 @@ impl CalculatorApp {
                             self.doc.target_row = i;
                             self.doc.target_path = vec![0];
                             self.doc.rows[i].ensure_number_box();
+                            focused_path = Some(vec![0]);
                         }
                     });
                 } else {
@@ -1419,6 +1442,7 @@ impl CalculatorApp {
                                     &mut context,
                                     idx,
                                     &mut word_edits,
+                                    self.show_adv,
                                 ) {
                                     focused = Some(p);
                                 }
@@ -1475,7 +1499,10 @@ impl CalculatorApp {
             ui.spacing_mut().item_spacing = egui::vec2(3.0, 3.0);
             if ui.add_sized(btn_sz, Button::new("(").fill(PALE_BLUE)).clicked() { self.on_key("("); }
             if ui.add_sized(btn_sz, Button::new(")").fill(PALE_BLUE)).clicked() { self.on_key(")"); }
-            if ui.add_sized(btn_sz, Button::new(RichText::new("C").color(Color32::WHITE).strong()).fill(RED)).clicked() { self.doc.clear_entry(); }
+            if ui.add_sized(btn_sz, Button::new(RichText::new("C").color(Color32::WHITE).strong()).fill(RED)).clicked() {
+                self.doc.clear();
+                self.status = "Cleared. Click a square box and type a number, or open Operators.".into();
+            }
             if ui.add_sized(wide_sz, Button::new("Operators").fill(PALE_BLUE)).clicked() { self.show_ops = !self.show_ops; }
         });
 
@@ -1717,7 +1744,7 @@ impl CalculatorApp {
         }
     }
 
-    fn equals(&mut self) {
+    pub fn equals(&mut self) {
         self.status = match self.doc.equals_all() {
             Ok(msg) => msg,
             Err(e) => e,
@@ -2001,6 +2028,7 @@ fn draw_formula_card(
     context: &mut String,
     card_idx: usize,
     word_edits: &mut Vec<(usize, String, String)>,
+    show_arrows: bool,
 ) -> Option<Vec<usize>> {
     use crate::layout::CardKind;
     let mut focused = None;
@@ -2009,83 +2037,97 @@ fn draw_formula_card(
         .inner_margin(egui::Margin::same(CARD_FRAME_INSET))
         .show(ui, |ui| {
             let is_box = card.kind == CardKind::Box;
-            let resp_lead = draw_card_shell(ui, "+", |ui, _mid_w| {
-                let (display_text, bg, stroke) = match card.kind {
-                    CardKind::Box => {
-                        let is_selected = is_target_row && card.path == target_path;
-                        let text = row.slot_text(&card.path).map_or("", |s| s.as_str());
-                        let disp = if text.is_empty() { "□" } else { text };
-                        let fill = if is_selected { TARGET_BLUE } else { PALE_BLUE };
-                        let st = if is_selected {
-                            egui::Stroke::new(2.5, BLUE)
-                        } else {
-                            egui::Stroke::new(1.0, BLUE)
-                        };
-                        (disp.to_string(), fill, st)
-                    }
-                    CardKind::Op => (
-                        card.text.clone(),
+            let (display_text, bg, stroke) = match card.kind {
+                CardKind::Box => {
+                    let is_selected = is_target_row && card.path == target_path;
+                    let text = row.slot_text(&card.path).map_or("", |s| s.as_str());
+                    let disp = if text.is_empty() { "□" } else { text };
+                    let fill = if is_selected { TARGET_BLUE } else { PALE_BLUE };
+                    let st = if is_selected {
+                        egui::Stroke::new(2.5, BLUE)
+                    } else {
+                        egui::Stroke::new(1.0, BLUE)
+                    };
+                    (disp.to_string(), fill, st)
+                }
+                CardKind::Op => (
+                    card.text.clone(),
+                    HELPER_YELLOW,
+                    egui::Stroke::new(1.0, Color32::from_rgb(0xd0, 0xa0, 0x20)),
+                ),
+                CardKind::Dec => {
+                    let disp = if card.text.is_empty() { "□" } else { card.text.as_str() };
+                    (
+                        disp.to_string(),
                         HELPER_YELLOW,
                         egui::Stroke::new(1.0, Color32::from_rgb(0xd0, 0xa0, 0x20)),
-                    ),
-                    CardKind::Dec => {
-                        let disp = if card.text.is_empty() { "□" } else { card.text.as_str() };
-                        (
-                            disp.to_string(),
-                            HELPER_YELLOW,
-                            egui::Stroke::new(1.0, Color32::from_rgb(0xd0, 0xa0, 0x20)),
-                        )
-                    }
-                    CardKind::Out => {
-                        let disp = if card.text.is_empty() { "□" } else { card.text.as_str() };
-                        (disp.to_string(), PALE_BLUE, egui::Stroke::new(1.0, BLUE))
-                    }
-                };
+                    )
+                }
+                CardKind::Out => {
+                    let disp = if card.text.is_empty() { "□" } else { card.text.as_str() };
+                    (disp.to_string(), PALE_BLUE, egui::Stroke::new(1.0, BLUE))
+                }
+            };
 
-                let w = (display_text.chars().count() as f32 * 9.0 + 16.0).max(36.0);
-                draw_arrow_grid(ui, w, |ui| {
+            let w = (display_text.chars().count() as f32 * 9.0 + 16.0).max(36.0);
+
+            if show_arrows {
+                let resp_lead = draw_card_shell(ui, "+", |ui, _mid_w| {
+                    draw_arrow_grid(ui, w, |ui| {
+                        let btn = Button::new(
+                            RichText::new(&display_text).size(14.0).strong().color(Color32::BLACK),
+                        )
+                        .fill(bg)
+                        .stroke(stroke)
+                        .rounding(2.0);
+                        if ui.add_sized(egui::vec2(w, ARROW_CENTER_H), btn).clicked() && is_box {
+                            focused = Some(card.path.clone());
+                        }
+                    });
+                    ui.add_space(6.0);
+                    let hint = if is_box { "[Item]" } else { "[Label]" };
+                    let (mut l, mut c) = (label.clone(), context.clone());
+                    let (item_w, context_w) = fit_word_widths(ui.available_width());
+                    let mut changed = false;
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(item_w + 6.0 + context_w, CARD_H),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            let a = ui.add(
+                                TextEdit::singleline(&mut l)
+                                    .desired_width(item_w)
+                                    .hint_text(hint)
+                                    .font(egui::TextStyle::Body),
+                            );
+                            ui.add_space(6.0);
+                            let b = ui.add(
+                                TextEdit::singleline(&mut c)
+                                    .desired_width(context_w)
+                                    .hint_text("[Context]")
+                                    .font(egui::TextStyle::Body),
+                            );
+                            changed = a.changed() || b.changed();
+                        },
+                    );
+                    if changed {
+                        word_edits.push((card_idx, l, c));
+                    }
+                });
+                if is_box && resp_lead.clicked() {
+                    focused = Some(card.path.clone());
+                }
+            } else {
+                ui.horizontal(|ui| {
                     let btn = Button::new(
                         RichText::new(&display_text).size(14.0).strong().color(Color32::BLACK),
                     )
                     .fill(bg)
                     .stroke(stroke)
                     .rounding(2.0);
-                    if ui.add_sized(egui::vec2(w, ARROW_CENTER_H), btn).clicked() && is_box {
+                    if ui.add_sized(egui::vec2(w, 32.0), btn).clicked() && is_box {
                         focused = Some(card.path.clone());
                     }
                 });
-                ui.add_space(6.0);
-                // Word boxes side-by-side (Tkinter make_component columns 2 & 3)
-                let hint = if is_box { "[Item]" } else { "[Label]" };
-                let (mut l, mut c) = (label.clone(), context.clone());
-                let (item_w, context_w) = fit_word_widths(ui.available_width());
-                let mut changed = false;
-                ui.allocate_ui_with_layout(
-                    egui::vec2(item_w + 6.0 + context_w, CARD_H),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        let a = ui.add(
-                            TextEdit::singleline(&mut l)
-                                .desired_width(item_w)
-                                .hint_text(hint)
-                                .font(egui::TextStyle::Body),
-                        );
-                        ui.add_space(6.0);
-                        let b = ui.add(
-                            TextEdit::singleline(&mut c)
-                                .desired_width(context_w)
-                                .hint_text("[Context]")
-                                .font(egui::TextStyle::Body),
-                        );
-                        changed = a.changed() || b.changed();
-                    },
-                );
-                if changed {
-                    word_edits.push((card_idx, l, c));
-                }
-            });
-            if is_box && resp_lead.clicked() {
-                focused = Some(card.path.clone());
             }
         });
     focused

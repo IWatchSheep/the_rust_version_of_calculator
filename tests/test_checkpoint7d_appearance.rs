@@ -1,12 +1,16 @@
-//! Checkpoint 7D: Appearance and Alignment Verification Tests
+//! Checkpoint 7D: Appearance, Alignment, and Dynamic Row Visibility Verification Tests
 //!
 //! Verifies:
 //! 1. Shared spreadsheet coordinate model across rows.
 //! 2. Excel column lettering beyond Column R (bijective base-26: A..Z, AA..ZZ, AAA..).
-//! 3. Total row structure: "Total" badge in Column A, empty Columns B..I reserving width,
-//!    and full result controls across Columns J through R.
-//! 4. Multi-row appearance consistency (1 row, 2 rows, 3 rows, Total row).
-//! 5. Independent styling and states for parentheses, exponents, and descriptions.
+//! 3. State A (Startup): Only Mathematical Row 1 is visible (Excel Rows 1..3). No Row 2, no Total.
+//! 4. State B (Add Row 2): Rows 1 and 2 visible. No Total.
+//! 5. State C (Press =): Row 1 (2 in E2), Row 2 (+ in C8, 3 in E8), Total displayed with 5 in Column M (Excel Rows 12..13).
+//! 6. Special Case: Single-row = displays result in Row 1 Column M without Total.
+//! 7. Repeated = does not duplicate Total row.
+//! 8. Additional rows do not automatically create Total.
+//! 9. State D (Clear): Restores only Row 1, removes extra rows, removes Total.
+//! 10. Independent row data (inputs, descriptions, parentheses, exponents) is strictly preserved.
 
 use rust_calculator::app::CalculatorApp;
 use rust_calculator::gui_coordinates::*;
@@ -58,79 +62,182 @@ fn test_req2_shared_absolute_column_coordinates() {
 }
 
 #[test]
-fn test_req3_total_row_creation_and_layout() {
-    let mut doc = Document::default();
-    doc.rows[0].ensure_number_box();
-    doc.rows[0].inputs = vec!["1".to_string()];
+fn test_req3_state_a_startup_row1_only() {
+    let doc = Document::new();
+    // At startup, only Mathematical Row 1 exists
+    assert_eq!(doc.rows.len(), 1, "Startup must show Row 1 only");
+    assert_eq!(doc.target_row, 0);
+    assert!(!doc.rows[0].is_result, "Row 1 is not a Total row");
+    assert!(doc.rows[0].is_blank());
+}
 
-    // Row 2 joined with +
+#[test]
+fn test_req4_state_b_add_row2_no_total() {
+    let mut doc = Document::new();
+    assert_eq!(doc.rows.len(), 1);
+
+    // Add Mathematical Row 2
+    doc.next_row();
+    assert_eq!(doc.rows.len(), 2, "Adding Row 2 creates exactly 2 mathematical rows");
+    assert_eq!(doc.target_row, 1);
+    assert!(!doc.rows[0].is_result);
+    assert!(!doc.rows[1].is_result, "Row 2 is not a Total row");
+    // Verify no Total row exists
+    assert!(doc.rows.iter().all(|r| !r.is_result), "No Total row exists in State B");
+}
+
+#[test]
+fn test_req5_state_c_calculation_with_total_row_5() {
+    let mut doc = Document::new();
+    // Enter 2 in E2 (Row 1)
+    doc.rows[0].ensure_number_box();
+    doc.rows[0].inputs = vec!["2".to_string()];
+
+    // Add + in C8 and 3 in E8 (Row 2)
+    doc.next_row();
     doc.rows[1].ensure_number_box();
     doc.rows[1].join = Join::Add;
-    doc.rows[1].inputs = vec!["1".to_string()];
+    doc.rows[1].inputs = vec!["3".to_string()];
 
-    // Equals creates Row 3 as the Total row
+    // Press =
     let res = doc.equals_all();
     assert!(res.is_ok(), "Calculation should succeed: {:?}", res);
-    assert_eq!(doc.rows.len(), 3);
+    assert_eq!(doc.rows.len(), 3, "Rows 1, 2, and exactly one Total row");
 
-    let row3 = &doc.rows[2];
-    assert!(row3.is_result, "Row 3 must be marked as result / Total row");
-    assert_eq!(row3.result, "2", "Total result should be 1 + 1 = 2");
+    // Row 1 result is 2
+    assert_eq!(doc.rows[0].result, "2");
+    // Row 2 result is 3
+    assert_eq!(doc.rows[1].result, "3");
+
+    // Total row
+    let total_row = &doc.rows[2];
+    assert!(total_row.is_result, "Row 3 must be the Total row");
+    assert_eq!(total_row.result, "5", "Total Column M must display 5 (2 + 3 = 5)");
 
     // Total row maintains independent paren pairs, exponents, and descriptions
-    assert_eq!(row3.paren_pairs_count, 1);
-    assert_eq!(row3.exponent_1, "");
-    assert_eq!(row3.result_descriptions.len(), 1);
+    assert_eq!(total_row.paren_pairs_count, 1);
+    assert_eq!(total_row.exponent_1, "");
+    assert_eq!(total_row.result_descriptions.len(), 1);
 }
 
 #[test]
-fn test_req4_total_row_parentheses_and_descriptions() {
-    let mut doc = Document::default();
+fn test_req6_special_case_single_row_no_total() {
+    let mut doc = Document::new();
     doc.rows[0].ensure_number_box();
-    doc.rows[0].inputs = vec!["5".to_string()];
+    doc.rows[0].inputs = vec!["42".to_string()];
 
+    // Press = on single row
+    let res = doc.equals_all();
+    assert!(res.is_ok());
+    assert_eq!(doc.rows[0].result, "42", "Row 1 Column M displays evaluated answer");
+    assert_eq!(doc.rows.len(), 1, "No separate Total row is created for single row");
+    assert!(!doc.rows[0].is_result);
+}
+
+#[test]
+fn test_req7_repeated_equals_does_not_duplicate_total() {
+    let mut doc = Document::new();
+    doc.rows[0].ensure_number_box();
+    doc.rows[0].inputs = vec!["2".to_string()];
+    doc.next_row();
     doc.rows[1].ensure_number_box();
     doc.rows[1].join = Join::Add;
-    doc.rows[1].inputs = vec!["10".to_string()];
+    doc.rows[1].inputs = vec!["3".to_string()];
 
-    let res = doc.equals_all();
-    assert!(res.is_ok(), "Calculation should succeed: {:?}", res);
+    // Press = first time
+    assert!(doc.equals_all().is_ok());
     assert_eq!(doc.rows.len(), 3);
+    assert_eq!(doc.rows[2].result, "5");
 
-    // Expand parentheses on the Total row
-    doc.rows[2].add_paren_pair();
-    assert_eq!(doc.rows[2].paren_pairs_count, 2);
-    assert_eq!(doc.rows[0].paren_pairs_count, 1, "Row 1 should not expand");
-    assert_eq!(doc.rows[1].paren_pairs_count, 1, "Row 2 should not expand");
+    // Press = second time
+    assert!(doc.equals_all().is_ok());
+    assert_eq!(doc.rows.len(), 3, "Repeated = must NOT duplicate Total row");
+    assert_eq!(doc.rows[2].result, "5");
 
-    // Add description on Total row
-    doc.rows[2].add_result_description();
-    assert_eq!(doc.rows[2].result_descriptions.len(), 2);
-    assert_eq!(doc.rows[0].result_descriptions.len(), 1);
-    assert_eq!(doc.rows[1].result_descriptions.len(), 1);
+    // Press = third time
+    assert!(doc.equals_all().is_ok());
+    assert_eq!(doc.rows.len(), 3, "Repeated = must NOT duplicate Total row");
+    assert_eq!(doc.rows[2].result, "5");
 }
 
 #[test]
-fn test_req5_app_state_and_row_count_tracking() {
+fn test_req8_adding_rows_removes_previous_total_until_equals() {
+    let mut doc = Document::new();
+    doc.rows[0].ensure_number_box();
+    doc.rows[0].inputs = vec!["2".to_string()];
+    doc.next_row();
+    doc.rows[1].ensure_number_box();
+    doc.rows[1].join = Join::Add;
+    doc.rows[1].inputs = vec!["3".to_string()];
+
+    // Calculate -> Total exists
+    assert!(doc.equals_all().is_ok());
+    assert_eq!(doc.rows.len(), 3);
+    assert!(doc.rows[2].is_result);
+
+    // User adds Row 3 -> Total is removed, Row 3 is a clean mathematical row
+    doc.next_row();
+    assert_eq!(doc.rows.len(), 3, "Total row was replaced by new Mathematical Row 3");
+    assert!(!doc.rows[2].is_result, "Row 3 is a mathematical row, not Total");
+    assert_eq!(doc.target_row, 2);
+
+    // Re-calculating with Row 3 adds Total immediately beneath Row 3
+    doc.rows[2].ensure_number_box();
+    doc.rows[2].join = Join::Add;
+    doc.rows[2].inputs = vec!["4".to_string()];
+    assert!(doc.equals_all().is_ok());
+    assert_eq!(doc.rows.len(), 4, "Rows 1, 2, 3, and Total");
+    assert!(doc.rows[3].is_result);
+    assert_eq!(doc.rows[3].result, "9", "2 + 3 + 4 = 9");
+}
+
+#[test]
+fn test_req9_state_d_clear_restores_only_row1() {
+    let mut doc = Document::new();
+    doc.rows[0].ensure_number_box();
+    doc.rows[0].inputs = vec!["2".to_string()];
+    doc.next_row();
+    doc.rows[1].ensure_number_box();
+    doc.rows[1].join = Join::Add;
+    doc.rows[1].inputs = vec!["3".to_string()];
+    let _ = doc.equals_all();
+    assert_eq!(doc.rows.len(), 3);
+
+    // Clear restores only Row 1
+    doc.clear();
+    assert_eq!(doc.rows.len(), 1, "Clear restores exactly one empty Row 1");
+    assert_eq!(doc.target_row, 0);
+    assert!(doc.rows[0].is_blank());
+    assert_eq!(doc.rows[0].paren_pairs_count, 1);
+    assert_eq!(doc.rows[0].exponent_1, "");
+    assert_eq!(doc.rows[0].result_descriptions.len(), 1);
+}
+
+#[test]
+fn test_req10_app_integration_and_keypad_actions() {
     let mut app = CalculatorApp::default();
-    // Default document starts with 2 rows ready
-    assert_eq!(app.doc.rows.len(), 2);
+    // Startup has Row 1 only
+    assert_eq!(app.doc.rows.len(), 1);
     assert_eq!(app.doc.target_row, 0);
 
-    // Type 3 into Row 1
+    // Enter 2 into Row 1
+    app.on_key("2");
+    assert_eq!(app.doc.rows[0].inputs.first().map(|s| s.as_str()), Some("2"));
+
+    // Add Row 2 using join key '+'
+    let msg = app.doc.join_key("+");
+    assert!(msg.contains("Row 2"));
+    assert_eq!(app.doc.rows.len(), 2, "Row 2 added via join key");
+    assert_eq!(app.doc.target_row, 1);
+    assert_eq!(app.doc.rows[1].join, Join::Add);
+
+    // Enter 3 into Row 2
     app.on_key("3");
-    assert_eq!(app.doc.rows[0].inputs.first().map(|s| s.as_str()), Some("3"));
+    assert_eq!(app.doc.rows[1].inputs.first().map(|s| s.as_str()), Some("3"));
 
-    // Advance to Row 2
-    app.doc.target_row = 1;
-    app.doc.rows[1].join = Join::Add;
-    app.on_key("4");
-    assert_eq!(app.doc.rows[1].inputs.first().map(|s| s.as_str()), Some("4"));
-
-    // Equals produces Row 3 as the Total row
-    let res = app.doc.equals_all();
-    assert!(res.is_ok());
+    // Equals produces Total row with 5
+    app.equals();
     assert_eq!(app.doc.rows.len(), 3);
     assert!(app.doc.rows[2].is_result);
-    assert_eq!(app.doc.rows[2].result, "7");
+    assert_eq!(app.doc.rows[2].result, "5");
 }
